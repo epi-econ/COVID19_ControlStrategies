@@ -10,13 +10,21 @@ calibration_time = proc.time()[3]
 # Lbar = 12, income = 58000: s_grid = seq(1.1, 1.6, length.out=200), alpha_U_grid = seq(0.1, 0.5, length.out=200). BC gap = 0.0000007595356
 # Lbar = 12, income = 44000: s_grid = seq(1.1, 1.6, length.out=200), alpha_U_grid = seq(0.1, 0.5, length.out=200). BC gap = 0.000001173954
 
-s_grid = seq(1.1, 1.8, length.out=200)
+message("ok 2")
+
+s_grid = seq(1.1, 1.8, length.out=200)		# These two grids are known to work well for the default parameterization
 alpha_U_grid = seq(0.1, 0.5, length.out=200)
+# s_grid = seq(1.025, 10, length.out=1000)
+# alpha_U_grid = seq(0.01, 0.99, length.out=1000)
 gamma_c_grid = 0
 gamma_l_grid = 0
 wageprem = 1
 priceprem = 1
-elasticity = 0.15
+elasticity = read.csv("target_elasticity_value.csv")$elasticity_parm # default is 0.15, can set this outside in the main calibration loop # AR 23/05/2021: for some reason even setting this to a specific value and not using "elasticity_parm" anywhere is still pulling an error that "elasticity_parm" wasn't found...
+wage <- read.csv(paste0("target_wage_value_",scenario_label,".csv"))$wage
+Lbar <- read.csv(paste0("target_Lbar_value_",scenario_label,".csv"))$Lbar
+
+message("ok 1")
 
 weights = c(1,1,0,0,1) # weights on calibration targets: labor supply, elasticity of labor supply, price premium, wage premium, budget constraint
 
@@ -35,9 +43,13 @@ if(social==1) {
 uniroot_lower_scaler = 100
 uniroot_upper_scaler = 10
 
+print(wageprem)
+
 # Givens/benchmarks
 p = 1
 benchmarks = data.frame(risk_aversion = risk_aversion, tau_parm=tau_parm, discount_factor=discount_factor, rho_c=rho_c, rho_l=rho_l, rho_o=rho_o, p=p, Cbm=Cbm, Lbm=Lbm, w=wage, wageprem = wageprem, priceprem = priceprem, elasticity = elasticity, pi_r = pi_r, pi_d = pi_d, Lbar = Lbar, nonlabor_income = nonlabor_income, phi = phi)
+
+print("ok 2")
 
 write.csv(benchmarks, file="calibration_benchmarks.csv")
 
@@ -52,7 +64,8 @@ delta_c = VSL*delta_pi_d	# compensation for increased death risk
 ##### Do grid search for parameter values (search_again==1) or load pre-computed values (search_again==0)
 
 if(calibrate==0) {
-	best_parms = read.csv("calibrated_parameters.csv")[,-1]
+	# best_parms = read.csv("calibrated_parameters.csv")[,-1]
+	best_parms = read.csv(paste0("../../Results/value_policy_functions/calibrated_parameters_",scenario_label,".csv"))[,-1]
 	values_at_best_parms = 
 		data.frame(labor_supply = labor_supply(best_parms,benchmarks)) %>%
 		mutate(labor_supply_I = labor_supply(best_parms,benchmarks,type="I")) %>%
@@ -64,7 +77,59 @@ if(calibrate==0) {
 		mutate(risk_aversion = risk_aversion)
 }
 
-if(calibrate==1) {
+if(calibrate==1&numerical_calibration==0) {
+
+# set optim upper and lower bounds
+# if(benchmarks$elasticity==0.15) {
+# 	calib_lower = 
+# }
+first_init <- c(1.55,0.99)
+new_inits <- first_init	
+calib_delta <- 10
+calibration_counter <- 0
+
+while(calib_delta > 0.01) {
+	result <- optim(par = new_inits, fn=calibration_objective_analytical, method="L-BFGS-B", lower=0.01, upper=5, calibration_targets=data.frame(labor_supply=benchmarks$Lbm, elasticity=elasticity), extra_parms=data.frame(wage=wage, Lbar=Lbar))
+
+	calib_delta <- abs(max(new_inits - result$par))
+	print(calib_delta)
+	new_inits <- result$par
+	print(new_inits)
+	calibration_counter <- calibration_counter + 1
+}
+
+message("Calibration complete using analytical formulas, took ", calibration_counter, " steps.")
+	sigma <- result$par[1]
+	alpha <- result$par[2]
+	alpha_hat <- (1-alpha)/alpha
+
+	loss <- result$value
+
+	best_parms = data.frame(s=sigma,
+		alpha_U=alpha,
+		gamma_c=0,
+		gamma_l=0,
+		loss=loss,
+		w=wage)
+
+	values_at_best_parms = data.frame(
+		labor_supply=l_star(sigma,alpha_hat,wage=wage,Lbar=Lbar),
+		labor_supply_I = l_star(sigma,alpha_hat,wage=benchmarks$phi*wage,Lbar=Lbar),
+		consumption=l_star(sigma,alpha_hat,wage=wage,Lbar=Lbar)*wage,
+		labor_supply_elasticity=eta_lw(sigma,alpha_hat,wage=wage,Lbar=Lbar),
+		price_premium_gap=0,
+		wage_premium_gap=0,
+		budget_constraint_gap=0,
+		loss=loss,
+		risk_aversion = 0.1)
+
+	if(best_parms$gamma_c==0&best_parms$gamma_l==0) {
+		write.csv(best_parms, file="calibrated_parameters_nosocial.csv")
+		write.csv(values_at_best_parms, file="targets_at_calibrated_parameters_nosocial.csv")
+	}
+}
+
+if(calibrate==1&numerical_calibration==1) {
 	parms_grid = expand.grid(s=s_grid, alpha_U=alpha_U_grid, gamma_c=gamma_c_grid, gamma_l=gamma_l_grid)
 	nrow(parms_grid)
 	print(benchmarks)

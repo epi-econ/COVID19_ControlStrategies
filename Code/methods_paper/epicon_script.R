@@ -63,10 +63,10 @@ if(length(scriptargs)==0) {
 	duration = 5.1						# duration of infectious period
 
 	## economic calibration targets
-	Cbm = (58000/365)	# daily annuitized consumption flow in dollars
+	Cbm = (65000/365)	# daily annuitized consumption flow in dollars
 	risk_aversion = 0.1
 
-	calibrate = 0
+	calibrate = 1
 
 	scenario_label = "interactive_run"
 
@@ -82,7 +82,13 @@ if(length(scriptargs)==0) {
 	kappa_c = 1
 	kappa_l = 1
 
+	target_VSL_or_Omega = "VSL"
+	VSL_target_parameter = 1e07
 	VSL = 1e07
+
+	elasticity_parm <- -0.23
+	lbm_share <- 0.3333
+	est_cfr <- 0.015
 }
 ## command line arguments
 if(length(scriptargs)>0) {
@@ -142,16 +148,46 @@ if(length(scriptargs)>0) {
 		target_VSL_or_Omega = "VSL"
 		VSL_target_parameter = 1e07
 	}
+	if(length(scriptargs)<=22) {
+		elasticity_parm <- 0.15
+	}
+	if(length(scriptargs)>22) {
+		elasticity_parm <- as.numeric(as.character(scriptargs[23]))
+		message(elasticity_parm)
+	}
+	if(length(scriptargs)<=23) {
+		lbm_share <- 0.3333
+	}
+	if(length(scriptargs)>23) {
+		lbm_share <- as.numeric(scriptargs[24])
+	}
+	if(length(scriptargs)<=24) {
+		est_cfr <- 0.015 # conditional on leaving I, 5% chance end up in D; Pr(I->D)
+	}
+	if(length(scriptargs)>24) {
+		est_cfr <- as.numeric(scriptargs[25])
+	}
+
 	message("Length of scriptargs is ", length(scriptargs))
+	# message(scriptargs)
+	# message("Elasticity is", elasticity_parm)
 }
 
-Lbm = 0.3333*24		# hours of day spent working
+message("Estimated CFR is ", est_cfr)
+print(elasticity_parm)
+
+message("ok 1111")
+
+Lbm = lbm_share*24		# hours of day spent working
 Lbar = 12 			# hours of day available for leisure
 plannertype = "weighted" 
 measurezero = 1		# This should always be turned on
 wage = Cbm/Lbm 		# hourly wage
+fwrite(data.frame(wage=wage), file = paste0("target_wage_value_",scenario_label,".csv"))
+fwrite(data.frame(Lbar=Lbar), file = paste0("target_Lbar_value_",scenario_label,".csv"))
 policy = 0
 nonlabor_income = 0
+numerical_calibration <- 0
 
 discount_rate = 0.04								# annual discount rate
 discount_factor = (1/(1+discount_rate))^(1/365)		# daily discount factor
@@ -167,7 +203,6 @@ rho_c = daily_cons_contacts/(Cbm^(2*kappa_c))	# daily_cons_contacts = rho_c*Cbm*
 rho_l = daily_work_contacts/(Lbm^(2*kappa_l))	# daily_work_contacts = rho_l*Lbm*Lbm
 rho_o = daily_other_contacts		# O*O := 1 (normalization)
 
-est_cfr = 0.015						# conditional on leaving I, 5% chance end up in D; Pr(I->D)
 proportion_removed = 1/duration		# 1 - (1 - (1/duration))^7
 pi_r = (1-est_cfr)*proportion_removed
 pi_d = est_cfr*proportion_removed
@@ -187,7 +222,11 @@ if(target_VSL_or_Omega=="Omega") { VSL = 1e07 }
 #####
 # B. Calibrate utility parameters
 #####
+print("check")
+fwrite(data.frame(elasticity_parm=elasticity_parm), file = paste0("target_elasticity_value.csv"))
 source("calibrate_utility_parameters.R", print.eval=TRUE)
+
+##############################################################################################
 
 s = best_parms$s 				# elasticity of substitution between leisure and consumption
 alpha_U = best_parms$alpha_U	# CES share parameter
@@ -308,7 +347,7 @@ contval_list = list(S=solved_values$lifetime_utility_S, I=solved_values$lifetime
 
 # save output as a file
 fwrite(solved_values, file=paste0("../../Results/value_policy_functions/value_policy_functions__",scenario_label,".csv"))
-
+solved_values <- read.csv(paste0("../../Results/value_policy_functions/value_policy_functions__","planner_cheby_test",".csv"))
 #####
 # C: generate baseline time series
 ####
