@@ -1,0 +1,7 @@
+contact_ordering,outcome,value
+concave,savings_from_plan,0.86
+concave,cases_per_100k_averted,1
+convex,savings_from_plan,0.95
+convex,cases_per_100k_averted,1
+linear,savings_from_plan,0.91
+linear,cases_per_100k_averted,1

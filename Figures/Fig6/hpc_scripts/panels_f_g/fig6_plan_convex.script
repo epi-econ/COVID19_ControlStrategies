@@ -1,0 +1,19 @@
+#!/bin/bash
+  #PBS -k o 
+  #PBS -l nodes=4:ppn=16
+  #PBS -l walltime=24:00:00
+  #PBS -m abe
+  #PBS -M abento 
+  #PBS -N abento measure0_calibrated
+  #PBS -V
+  #PBS -j oe
+
+cd /N/slate/abento/epicon/Code/methods_paper
+pwd
+
+module load r/3.6.0
+
+for precision in 3
+do
+  nohup Rscript epicon_script.R 64 35 1 "nosocial" "planner" 4.2877 3.1625 5 2.6 5.1 58000 0.1 1 "plan-convex" "R0" $precision 0.8554632 2 2 > logs/plan_convex_$precision.log 2>&1
+done
