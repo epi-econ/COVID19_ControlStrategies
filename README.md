@@ -1,6 +1,6 @@
 # "Disease-economy trade-offs under alternative pandemic control strategies" replication package
 
-This repository contains data, code, and images for the paper "Disease-economy trade-offs under alternative pandemic control strategies". The model output was generated in R 3.6.0, 3.6.3, and 4.0.1. Please contact Ana Bento (abento@iu.edu) or Akhil Rao (akhilr@middlebury.edu) if you have questions regarding the data or code used. 
+This repository contains data, code, and images for the paper "Disease-economy trade-offs under alternative pandemic control strategies". The model output was generated in R 3.6.0, 3.6.3, and 4.0.1. Please contact Ana Bento (abento@iu.edu) or Akhil Rao (akhilr@middlebury.edu) if you have questions regarding the data or code. 
 
 ### How is this repository organized?
 
