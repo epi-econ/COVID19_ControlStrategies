@@ -2,6 +2,8 @@
 
 This repository contains data, code, and images for the paper "Disease-economy trade-offs under alternative epidemic control strategies". The model output was generated in R 3.6.0, 3.6.3, and 4.0.1. Please contact Ana Bento (abento@iu.edu) or Akhil Rao (akhilr@middlebury.edu) if you have questions regarding the data or code. 
 
+[![DOI](https://zenodo.org/badge/332062198.svg)](https://zenodo.org/badge/latestdoi/332062198)
+
 ### How is this repository organized?
 
 * /Code contains all of the R code used to generate model results.
