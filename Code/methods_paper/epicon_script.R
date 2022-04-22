@@ -35,7 +35,7 @@ scriptargs = commandArgs(trailingOnly = TRUE)
 # A: Create grid, set non-utility structural parameters prior to calibration
 #####
 
-ncores = 80
+ncores = 75
 
 ## initial conditions: placed here so that they can be used to generate the grid
 total_population = 331002651				# 331002651 is the US population
@@ -46,14 +46,17 @@ SIR_init = data.frame(S=S_0, I=I_0, R=R_0)
 
 ## interactive run arguments
 if(length(scriptargs)==0) {
-	S_gridlength = 15
-	I_gridlength = 15
-	R_gridlength = 15
-	grid_pieces = build_grid(S_gridlength, I_gridlength, R_gridlength)
-	hot_start = 0
+	S_gridlength = 30
+	I_gridlength = 30
+	R_gridlength = 30
+	grid_pieces = build_grid(S_gridlength, I_gridlength, R_gridlength, cheby=1)
+	head(grid_pieces$I)
+	100*exp(100*head(grid_pieces$I))*head(grid_pieces$I)
+	1000*exp(head(grid_pieces$I))*head(grid_pieces$I)
+	hot_start = 1
 
 	social = 0
-	problemtype = "decentralized"
+	problemtype = "planner"
 
 	# structural infection/contact parameters
 	daily_cons_contacts = 5.166426 		# avg daily contacts at consumption activities
@@ -63,12 +66,12 @@ if(length(scriptargs)==0) {
 	duration = 5.1						# duration of infectious period
 
 	## economic calibration targets
-	Cbm = (65000/365)	# daily annuitized consumption flow in dollars
+	Cbm = (58000/365)	# daily annuitized consumption flow in dollars
 	risk_aversion = 0.1
 
 	calibrate = 1
 
-	scenario_label = "interactive_run"
+	scenario_label = "penalty_test_fine"
 
 	phi = 0.8554632		# labor productivity of infected type, others are 1. The calculation is shown in the SI Appendix.
 
@@ -83,12 +86,18 @@ if(length(scriptargs)==0) {
 	kappa_l = 1
 
 	target_VSL_or_Omega = "VSL"
-	VSL_target_parameter = 1e07
-	VSL = 1e07
+	VSL_target_parameter = 1 #1e07
+	VSL = 1# 1e07
 
-	elasticity_parm <- -0.23
+	elasticity_parm <- 0.15 #-0.23
 	lbm_share <- 0.3333
 	est_cfr <- 0.015
+
+	caseload_wt <- 5
+
+	caseload_type <- "linear"
+
+	objective_type <- "welfare"
 }
 ## command line arguments
 if(length(scriptargs)>0) {
@@ -167,6 +176,24 @@ if(length(scriptargs)>0) {
 	if(length(scriptargs)>24) {
 		est_cfr <- as.numeric(scriptargs[25])
 	}
+	if(length(scriptargs)<=25) {
+		caseload_wt <- 0 # if not supplied, assume planner cares only about preferences
+	}
+	if(length(scriptargs)>25) {
+		caseload_wt <- as.numeric(scriptargs[26])
+	}
+	if(length(scriptargs)<=26) {
+		caseload_type <- "linear"
+	}
+	if(length(scriptargs)>26) {
+		caseload_type <- as.character(scriptargs[27])
+	}
+	if(length(scriptargs)<=27) {
+		objective_type <- "welfare"
+	}
+	if(length(scriptargs)>27) {
+		objective_type <- as.character(scriptargs[28])
+	}
 
 	message("Length of scriptargs is ", length(scriptargs))
 	# message(scriptargs)
@@ -175,6 +202,7 @@ if(length(scriptargs)>0) {
 
 message("Estimated CFR is ", est_cfr)
 print(elasticity_parm)
+print(caseload_type)
 
 message("ok 1111")
 
@@ -192,7 +220,7 @@ numerical_calibration <- 0
 discount_rate = 0.04								# annual discount rate
 discount_factor = (1/(1+discount_rate))^(1/365)		# daily discount factor
 
-final.time = 548	# number of periods for time series projection
+final.time = 650	# number of periods for time series projection
 
 grid_list = grid_pieces[1:3]
 grid_dfrm = grid_pieces$dfrm
@@ -248,7 +276,7 @@ l_R_guess = values_at_best_parms$labor_supply
 cl = makeCluster(ncores)
 registerDoParallel(cl)
 
-exog_parms = data.frame(gamma_c=gamma_c, gamma_l=gamma_l, rho_c=rho_c, rho_l=rho_l, rho_o=rho_o, pi_r=pi_r, pi_d=pi_d, discount_factor=discount_factor, phi=phi, w=wage, final.time=final.time, s=s, risk_aversion=risk_aversion, gamma = duration, tau_parm=tau_parm, R0=target_R0, alpha_U=alpha_U, precision=precision, udeath = U_D, Cbm = Cbm, Lbm = Lbm, Lbar = Lbar, problemtype = problemtype, plannertype = plannertype, kappa_c = kappa_c, kappa_l = kappa_l)
+exog_parms = data.frame(gamma_c=gamma_c, gamma_l=gamma_l, rho_c=rho_c, rho_l=rho_l, rho_o=rho_o, pi_r=pi_r, pi_d=pi_d, discount_factor=discount_factor, phi=phi, w=wage, final.time=final.time, s=s, risk_aversion=risk_aversion, gamma = duration, tau_parm=tau_parm, R0=target_R0, alpha_U=alpha_U, precision=precision, udeath = U_D, Cbm = Cbm, Lbm = Lbm, Lbar = Lbar, problemtype = problemtype, plannertype = plannertype, kappa_c = kappa_c, kappa_l = kappa_l, caseload_wt = caseload_wt, caseload_type = caseload_type, objective_type = objective_type)
 
 fwrite(exog_parms, file = paste0("../../Results/value_policy_functions/calibrated_parameters_",scenario_label,".csv"))
 fwrite(exog_parms, file = paste0("../../Results/value_policy_functions/exog_parms.csv"))
@@ -347,7 +375,8 @@ contval_list = list(S=solved_values$lifetime_utility_S, I=solved_values$lifetime
 
 # save output as a file
 fwrite(solved_values, file=paste0("../../Results/value_policy_functions/value_policy_functions__",scenario_label,".csv"))
-solved_values <- read.csv(paste0("../../Results/value_policy_functions/value_policy_functions__","planner_cheby_test",".csv"))
+# solved_values <- read.csv(paste0("../../Results/value_policy_functions/value_policy_functions__","planner_cheby_test",".csv"))
+solved_values <- read.csv(paste0("../../Results/value_policy_functions/value_policy_functions__",scenario_label,".csv"))
 #####
 # C: generate baseline time series
 ####

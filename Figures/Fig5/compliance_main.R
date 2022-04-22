@@ -158,7 +158,12 @@ no_compliance_figs_summary$cases + no_compliance_figs_summary$losses
 
 quality_sequence <- c( seq(from=0.1, to=max_test_quality, length=day_test_gets_perfect), rep(1,length.out=(final.time-day_test_gets_perfect)))
 
-lag_sequence <- c(rep(8,length.out=60), rep(5,length.out=(final.time-60)))
+# lag_sequence <- c(rep(8,length.out=60), rep(5,length.out=(final.time-60)))
+lag_sequence <- c(
+		rep(8,length.out=60), 
+		rep(5,length.out=(75-60)),
+		rep(3, length.out=(final.time-75))
+		 )
 infolag_list_seq <- list(lag_sequence = lag_sequence, quality_sequence = quality_sequence)
 exog_parms$compliance <- 1
 
@@ -170,8 +175,8 @@ opt_partialcompliance2 <- generate_time_series(opt_vpfn, fallback_solved_values=
 opt_partialcompliance2 <- cbind(opt_partialcompliance2,infolag=0.85,type="plan")
 
 dfrm_partialcompliance2 <- rbind(eqm_partialcompliance2, lockdown_partialcompliance2, opt_partialcompliance2)
-partial_compliance2_figs_dynamics <- generate_dynamics_figures_small_composite(dfrm_partialcompliance2, "Partial compliance, improving information")
-partial_compliance2_figs_summary <- generate_recession_metrics_small_composite(dfrm_partialcompliance2, "Partial compliance, improving information")
+partial_compliance2_figs_dynamics <- generate_dynamics_figures_small_composite(dfrm_partialcompliance2, "Partial compliance, improving information", end_time=final.time)
+partial_compliance2_figs_summary <- generate_recession_metrics_small_composite(dfrm_partialcompliance2, "Partial compliance, improving information", end_time=final.time)
 
 
 #####

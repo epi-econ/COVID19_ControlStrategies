@@ -111,11 +111,11 @@ recovereds = ggplot() +
             guides(linetype=FALSE, size=FALSE)
 
 R_effective = ggplot() + 
-            geom_line(data = line_data, aes(x = time, y=Reff*100, group=ensemble_id), alpha = 0.05, size = 0.75) +
-            geom_line(data =(all_scenarios %>% filter(ensemble_id == "decentralized")), aes(x = time, y = Reff*100), size=1, color="firebrick3") +
-            geom_line(data =(all_scenarios %>% filter(ensemble_id == "coordinated")), aes(x = time, y = Reff*100), linetype="dashed", size=1.5, color="dodgerblue3") +
-            theme_bw() + ggtitle("R_effective") +
-            xlab("Day") + ylab("R_t") + 
+            geom_line(data = line_data, aes(x = time, y=Reff, group=ensemble_id), alpha = 0.05, size = 0.75) +
+            geom_line(data =(all_scenarios %>% filter(ensemble_id == "decentralized")), aes(x = time, y = Reff), size=1, color="firebrick3") +
+            geom_line(data =(all_scenarios %>% filter(ensemble_id == "coordinated")), aes(x = time, y = Reff), linetype="dashed", size=1.5, color="dodgerblue3") +
+            theme_bw() + ggtitle("Reproductive number") +
+            xlab("Day") + ylab("R_effective") + 
             guides(linetype=FALSE, size=FALSE)
 
 susceptibles = ggplot() + 
@@ -189,6 +189,13 @@ ensemble_plot_second <- (consumption | infection) / (econ_hist | epi_hist) + plo
 
 png(paste0("../lockdown_second.png"), width=1000, height=500)
 ensemble_plot_second
+dev.off()
+
+ensemble_plot_third <- (consumption | infection | R_effective) / (econ_hist | epi_hist) + plot_annotation(tag_levels = 'a')
+ensemble_plot_third
+
+png(paste0("../lockdown_third.png"), width=1000, height=500)
+ensemble_plot_third
 dev.off()
 
 

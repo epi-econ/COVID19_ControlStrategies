@@ -1,0 +1,52 @@
+state,statename,DateEmergDec,DateSchoolClose,DateRestaurantOtherRestrict,DateNEBusinessClose,DateStayAtHome,DateFirstCase,DateFirstDeath,DateFirstAnnounce,DateReOpen,DateReOpenPhase2
+AL,Alabama,13-Mar-20,19-Mar-20,19-Mar-20,,4-Apr-20,13-Mar-20,25-Mar-20,28-Apr-20,30-Apr-20,11-May-20
+AK,Alaska,11-Mar-20,16-Mar-20,17-Mar-20,28-Mar-20,28-Mar-20,12-Mar-20,27-Mar-20,21-Apr-20,24-Apr-20,8-May-20
+AZ,Arizona,11-Mar-20,16-Mar-20,31-Mar-20,,31-Mar-20,26-Jan-20,20-Mar-20,29-Apr-20,8-May-20,11-May-20
+AR,Arkansas,11-Mar-20,17-Mar-20,17-Mar-20,,,11-Mar-20,24-Mar-20,28-Apr-20,4-May-20,15-Jun-20
+CA,California,4-Mar-20,19-Mar-20,16-Mar-20,19-Mar-20,19-Mar-20,26-Jan-20,4-Mar-20,28-Apr-20,8-May-20,18-May-20
+CO,Colorado,11-Mar-20,23-Mar-20,15-Mar-20,26-Mar-20,26-Mar-20,5-Mar-20,12-Mar-20,21-Apr-20,1-May-20,27-May-20
+CT,Connecticut,10-Mar-20,17-Mar-20,16-Mar-20,23-Mar-20,23-Mar-20,8-Mar-20,18-Mar-20,9-May-20,20-May-20,17-Jun-20
+DE,Delaware,13-Mar-20,16-Mar-20,16-Mar-20,24-Mar-20,24-Mar-20,11-Mar-20,26-Mar-20,15-May-20,1-Jun-20,15-Jun-20
+DC,District of Columbia,11-Mar-20,16-Mar-20,16-Mar-20,25-Mar-20,1-Apr-20,7-Mar-20,21-Mar-20,27-May-20,29-May-20,22-Jun-20
+FL,Florida,9-Mar-20,16-Mar-20,17-Mar-20,,3-Apr-20,2-Mar-20,6-Mar-20,29-Apr-20,4-May-20,5-Jun-20
+GA,Georgia,14-Mar-20,18-Mar-20,24-Mar-20,,3-Apr-20,2-Mar-20,12-Mar-20,20-Apr-20,24-Apr-20,28-May-20
+HI,Hawaii,4-Mar-20,23-Mar-20,17-Mar-20,25-Mar-20,25-Mar-20,6-Mar-20,31-Mar-20,5-May-20,7-May-20,22-May-20
+ID,Idaho,13-Mar-20,23-Mar-20,25-Mar-20,25-Mar-20,25-Mar-20,13-Mar-20,26-Mar-20,23-Apr-20,1-May-20,16-May-20
+IL,Illinois,9-Mar-20,17-Mar-20,16-Mar-20,21-Mar-20,21-Mar-20,24-Jan-20,17-Mar-20,5-May-20,1-May-20,29-May-20
+IN,Indiana,6-Mar-20,19-Mar-20,16-Mar-20,25-Mar-20,25-Mar-20,6-Mar-20,16-Mar-20,1-May-20,4-May-20,12-Jun-20
+IA,Iowa,9-Mar-20,3-Apr-20,17-Mar-20,,,8-Mar-20,24-Mar-20,27-Apr-20,1-May-20,15-May-20
+KS,Kansas,12-Mar-20,18-Mar-20,30-Mar-20,,30-Mar-20,7-Mar-20,12-Mar-20,30-Apr-20,4-May-20,22-May-20
+KY,Kentucky,6-Mar-20,16-Mar-20,16-Mar-20,26-Mar-20,26-Mar-20,6-Mar-20,16-Mar-20,29-Apr-20,11-May-20,1-Jun-20
+LA,Louisiana,11-Mar-20,16-Mar-20,17-Mar-20,23-Mar-20,23-Mar-20,9-Mar-20,14-Mar-20,11-May-20,15-May-20,5-Jun-20
+ME,Maine,15-Mar-20,16-Mar-20,18-Mar-20,25-Mar-20,2-Apr-20,12-Mar-20,27-Mar-20,28-Apr-20,1-May-20,1-Jun-20
+MD,Maryland,5-Mar-20,16-Mar-20,16-Mar-20,23-Mar-20,30-Mar-20,5-Mar-20,18-Mar-20,13-May-20,15-May-20,5-Jun-20
+MA,Massachusetts,10-Mar-20,17-Mar-20,17-Mar-20,24-Mar-20,24-Mar-20,1-Feb-20,20-Mar-20,11-May-20,18-May-20,8-Jun-20
+MI,Michigan,10-Mar-20,16-Mar-20,16-Mar-20,23-Mar-20,24-Mar-20,10-Mar-20,18-Mar-20,7-May-20,7-May-20,1-Jun-20
+MN,Minnesota,13-Mar-20,18-Mar-20,17-Mar-20,,28-Mar-20,6-Mar-20,21-Mar-20,23-Apr-20,27-Apr-20,1-Jun-20
+MS,Mississippi,14-Mar-20,20-Mar-20,24-Mar-20,3-Apr-20,3-Apr-20,11-Mar-20,19-Mar-20,24-Apr-20,27-Apr-20,1-Jun-20
+MO,Missouri,13-Mar-20,23-Mar-20,23-Mar-20,,6-Apr-20,8-Mar-20,18-Mar-20,27-Apr-20,4-May-20,16-Jun-20
+MT,Montana,12-Mar-20,16-Mar-20,20-Mar-20,28-Mar-20,28-Mar-20,13-Mar-20,27-Mar-20,22-Apr-20,26-Apr-20,1-Jun-20
+NE,Nebraska,13-Mar-20,3-Apr-20,3-Apr-20,,,6-Mar-20,27-Mar-20,24-Apr-20,4-May-20,1-Jun-20
+NV,Nevada,12-Mar-20,16-Mar-20,19-Mar-20,,31-Mar-20,5-Mar-20,16-Mar-20,30-Apr-20,9-May-20,29-May-20
+NH,New Hampshire,13-Mar-20,16-Mar-20,16-Mar-20,28-Mar-20,28-Mar-20,2-Mar-20,23-Mar-20,1-May-20,4-May-20,1-Jun-20
+NJ,New Jersey,9-Mar-20,18-Mar-20,16-Mar-20,21-Mar-20,21-Mar-20,4-Mar-20,10-Mar-20,27-Apr-20,2-May-20,15-Jun-20
+NM,New Mexico,11-Mar-20,16-Mar-20,16-Mar-20,24-Mar-20,24-Mar-20,11-Mar-20,25-Mar-20,30-Apr-20,1-May-20,16-May-20
+NY,New York,7-Mar-20,18-Mar-20,16-Mar-20,22-Mar-20,22-Mar-20,1-Mar-20,14-Mar-20,4-May-20,15-May-20,3-Jun-20
+NC,North Carolina,10-Mar-20,16-Mar-20,17-Mar-20,30-Mar-20,30-Mar-20,3-Mar-20,25-Mar-20,5-May-20,8-May-20,22-May-20
+ND,North Dakota,13-Mar-20,16-Mar-20,20-Mar-20,,,11-Mar-20,27-Mar-20,28-Apr-20,1-May-20,29-May-20
+OH,Ohio,9-Mar-20,17-Mar-20,15-Mar-20,24-Mar-20,24-Mar-20,9-Mar-20,20-Mar-20,27-Apr-20,1-May-20,26-May-20
+OK,Oklahoma,15-Mar-20,17-Mar-20,1-Apr-20,1-Apr-20,,6-Mar-20,19-Mar-20,22-Apr-20,24-Apr-20,15-May-20
+OR,Oregon,8-Mar-20,16-Mar-20,17-Mar-20,,23-Mar-20,28-Feb-20,14-Mar-20,6-May-20,15-May-20,4-Jun-20
+PA,Pennsylvania,6-Mar-20,16-Mar-20,17-Mar-20,23-Mar-20,1-Apr-20,6-Mar-20,18-Mar-20,4-May-20,8-May-20,29-May-20
+RI,Rhode Island,9-Mar-20,16-Mar-20,17-Mar-20,,28-Mar-20,1-Mar-20,1-Apr-20,27-Apr-20,9-May-20,1-Jun-20
+SC,South Carolina,13-Mar-20,16-Mar-20,18-Mar-20,,7-Apr-20,7-Mar-20,16-Mar-20,20-Apr-20,20-Apr-20,18-May-20
+SD,South Dakota,13-Mar-20,16-Mar-20,,,,10-Mar-20,10-Mar-20,28-Apr-20,1-May-20,
+TN,Tennessee,12-Mar-20,20-Mar-20,23-Mar-20,1-Apr-20,1-Apr-20,5-Mar-20,21-Mar-20,20-Apr-20,27-Apr-20,22-May-20
+TX,Texas,13-Mar-20,23-Mar-20,21-Mar-20,,2-Apr-20,13-Feb-20,16-Mar-20,27-Apr-20,1-May-20,18-May-20
+UT,Utah,6-Mar-20,16-Mar-20,19-Mar-20,,27-Mar-20,6-Mar-20,22-Mar-20,17-Apr-20,1-May-20,16-May-20
+VT,Vermont,13-Mar-20,18-Mar-20,17-Mar-20,25-Mar-20,24-Mar-20,7-Mar-20,19-Mar-20,17-Apr-20,27-Apr-20,18-May-20
+VA,Virginia,12-Mar-20,16-Mar-20,17-Mar-20,,30-Mar-20,7-Mar-20,14-Mar-20,24-Apr-20,15-May-20,5-Jun-20
+WA,Washington,29-Feb-20,17-Mar-20,16-Mar-20,25-Mar-20,23-Mar-20,21-Jan-20,29-Feb-20,1-May-20,5-May-20,11-May-20
+WV,West Virginia,16-Mar-20,16-Mar-20,18-Mar-20,24-Mar-20,24-Mar-20,17-Mar-20,29-Mar-20,27-Apr-20,4-May-20,21-May-20
+WI,Wisconsin,12-Mar-20,18-Mar-20,17-Mar-20,25-Mar-20,25-Mar-20,5-Feb-20,19-Mar-20,20-Apr-20,20-Apr-20,13-May-20
+WY,Wyoming,13-Mar-20,16-Mar-20,19-Mar-20,,,11-Mar-20,13-Apr-20,23-Apr-20,1-May-20,

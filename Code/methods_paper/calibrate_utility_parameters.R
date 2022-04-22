@@ -219,6 +219,14 @@ print(VSL_balance(uniroot_upper_scaler*U_R, c_I, pi_d, pi_r, discount_factor, U_
 
 U_D = result$root
 
+# implied_VSL_balance(1e10, c_I = c_I, pi_d = pi_d, pi_r = pi_r, discount_factor = discount_factor, U_R = U_R, risk_aversion = 1.1, s = s, alpha_U = alpha_U, C=0, L=0, U_D = 0, delta_pi_d = delta_pi_d, Lbar = Lbar)
+
+# U_R = total_utility(Cbm,Lbm,Cbm,Lbm,gamma_c=0,gamma_l=0,rho_c=0,rho_l=0,risk_aversion=1.2,s=s,alpha=alpha_U, Lbar=Lbar)/(1-discount_factor)
+
+# (implied_VSL_result <- uniroot(implied_VSL_balance, interval=c(0, 1e50), c_I = c_I, pi_d = pi_d, pi_r = pi_r, discount_factor = discount_factor, U_R = U_R, risk_aversion = 1.2, s = s, alpha_U = alpha_U, C=0, L=0, U_D = 0, delta_pi_d = delta_pi_d, Lbar = Lbar))
+
+# (implied_VSL = implied_VSL_result$root/delta_pi_d)
+
 message("Time endowment is ", Lbar, " hours.")
 
 message("Lifetime utility of death (U_D): ")

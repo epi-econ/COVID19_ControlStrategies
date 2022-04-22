@@ -1,7 +1,7 @@
 "","infolag","type","measure","values"
-"1",1.8,"decentralized","losses",9891
-"2",1.8,"decentralized","casesp100k",61545
-"3",1.8,"lockdown","losses",12502
-"4",1.8,"lockdown","casesp100k",61480
-"5",1.8,"coordinated","losses",1408
-"6",1.8,"coordinated","casesp100k",61347
+"1",1.8,"decentralized","losses",9075
+"2",1.8,"decentralized","casesp100k",61588
+"3",1.8,"lockdown","losses",12489
+"4",1.8,"lockdown","casesp100k",61536
+"5",1.8,"coordinated","losses",1697
+"6",1.8,"coordinated","casesp100k",61406

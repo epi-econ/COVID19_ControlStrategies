@@ -1,0 +1,31 @@
+infolag,Scenario,Strategy,measure,values
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Voluntary Isolation,losses,8690
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Voluntary Isolation,casesp100k,61775
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Blanket Lockdown,losses,12320
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Blanket Lockdown,casesp100k,61733
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Targeted Isolation,losses,1702
+imp_q__imp_d_1,Decreased testing lag + improving testing quality,Targeted Isolation,casesp100k,61591
+imp_q__no_d,No testing lag + improving test quality,Voluntary Isolation,losses,9891
+imp_q__no_d,No testing lag + improving test quality,Voluntary Isolation,casesp100k,61545
+imp_q__no_d,No testing lag + improving test quality,Blanket Lockdown,losses,12502
+imp_q__no_d,No testing lag + improving test quality,Blanket Lockdown,casesp100k,61480
+imp_q__no_d,No testing lag + improving test quality,Targeted Isolation,losses,1408
+imp_q__no_d,No testing lag + improving test quality,Targeted Isolation,casesp100k,61347
+perf_q_imp_d,Decreased testing lag + perfect test quality,Voluntary Isolation,losses,5362
+perf_q_imp_d,Decreased testing lag + perfect test quality,Voluntary Isolation,casesp100k,63748
+perf_q_imp_d,Decreased testing lag + perfect test quality,Blanket Lockdown,losses,9043
+perf_q_imp_d,Decreased testing lag + perfect test quality,Blanket Lockdown,casesp100k,63444
+perf_q_imp_d,Decreased testing lag + perfect test quality,Targeted Isolation,losses,4734
+perf_q_imp_d,Decreased testing lag + perfect test quality,Targeted Isolation,casesp100k,63747
+worst_case,Testing lag + poor quality test,Blanket Lockdown,losses,5485
+worst_case,Testing lag + poor quality test,Blanket Lockdown,casesp100k,63170
+worst_case,Testing lag + poor quality test,Voluntary Isolation,losses,8846
+worst_case,Testing lag + poor quality test,Voluntary Isolation,casesp100k,63110
+worst_case,Testing lag + poor quality test,Targeted Isolation,losses,4814
+worst_case,Testing lag + poor quality test,Targeted Isolation,casesp100k,63109
+benchmark,Frictionless baseline,Voluntary Isolation,losses,21119.23
+benchmark,Frictionless baseline,Voluntary Isolation,casesp100k,61486
+benchmark,Frictionless baseline,Blanket Lockdown,losses,12078.67
+benchmark,Frictionless baseline,Blanket Lockdown,casesp100k,61826
+benchmark,Frictionless baseline,Targeted Isolation,losses,1082.67
+benchmark,Frictionless baseline,Targeted Isolation,casesp100k,61629

@@ -179,7 +179,7 @@ SIR_update <- function(parms,choices,aggregates) {
 }
 
 # function to generate important epi and econ series from solved policy functions and initial conditions
-SIR_series <- function(parms,choices_list,aggregates,method="multilinear",grid_dfrm=NULL) {
+SIR_series <- function(parms, choices_list, aggregates, method="multilinear", grid_dfrm=NULL, grid_list=NULL, infolag_list=NULL, fallback_choices_list=NULL, policy_list=NULL, solved_values=NULL, fallback_solved_values=NULL) {
     w = parms$w
     phi = parms$phi
     final.time = parms$final.time
@@ -190,6 +190,50 @@ SIR_series <- function(parms,choices_list,aggregates,method="multilinear",grid_d
     rho_o = parms$rho_o
     kappa_c = parms$kappa_c
     kappa_l = parms$kappa_l
+    test_quality <- 1
+    if("test_quality"%in%names(parms)==TRUE) {test_quality <- parms$test_quality}
+    tq_seq <- NULL
+    policy_switch <- 0
+    problem_type <- as.character(unique(solved_values$type))
+
+    if("infolag"%in%names(parms)==TRUE) { infolag <- parms$infolag }
+    if("infolag"%in%names(parms)==FALSE) { infolag <- 0 }
+    if(length(infolag_list)>0) {
+        infolag_list <- infolag_list
+        infolag_vec <- infolag_list$lag_sequence
+    }
+
+    if("quality_sequence"%in%names(infolag_list)==TRUE) { tq_seq <- infolag_list$quality_sequence }
+
+    if(is.null(fallback_choices_list)==FALSE) { 
+        # message("yeet1")
+        fallback_labor_supply <- data.frame(S=NA,I=NA,R=NA) 
+        fallback_grid_list = fallback_choices_list$grid_list
+        fallback_choices = fallback_choices_list$choices
+    }
+
+    if("compliance"%in%names(parms)==TRUE) { compliance <- parms$compliance }
+    if("compliance"%in%names(parms)==FALSE) { compliance <- 1 }
+
+    if("eqm_concept"%in%names(parms)==TRUE) { 
+        ncores <- min(detectCores()-1,18)
+        cl = makeCluster(ncores, type="FORK")
+        registerDoParallel(cl)
+        setDefaultCluster(cl=cl)
+
+        message("yeetleets")
+
+        eqm_concept <- parms$eqm_concept 
+        mixing_prob_mat <- as.data.frame(matrix(NA,nrow=final.time,ncol=9))
+        mixing_prob_mat[1,] <- c(1,0,0, 0,1,0, 0,0,1)
+        colnames(mixing_prob_mat) <- c("l_SS","l_SI","l_SR","l_IS","l_II","l_IR","l_RS","l_RI","l_RR")
+    }
+    if("eqm_concept"%in%names(parms)==FALSE) { 
+        eqm_concept <- "default" 
+        mixing_prob_mat <- as.data.frame(matrix(NA,nrow=final.time,ncol=9))
+        mixing_prob_mat[1,] <- c(1,0,0, 0,1,0, 0,0,1)
+        colnames(mixing_prob_mat) <- c("l_SS","l_SI","l_SR","l_IS","l_II","l_IR","l_RS","l_RI","l_RR")
+    }
 
     S_0 = aggregates$S
     I_0 = aggregates$I
@@ -205,6 +249,15 @@ SIR_series <- function(parms,choices_list,aggregates,method="multilinear",grid_d
     l_I0 = project_choices("I", state, choices_list$grid_list, choices_list$choices)
     l_R0 = project_choices("R", state, choices_list$grid_list, choices_list$choices)
 
+    if(length(policy_list)>0) {
+        policy_switch = policy_list$switch
+        policy_start = policy_list$start_date
+        policy_stop = policy_list$end_date
+        policy_labor_restriction = policy_list$labor_supply_level
+        policy_state_dependent = policy_list$state_dependent
+        restricted_level = l_S0*policy_labor_restriction
+    }
+
     output_series = data.frame(S = rep(S_0,length.out=final.time),
                                 I = rep(I_0,length.out=final.time),
                                 R = rep(R_0,length.out=final.time),
@@ -218,20 +271,175 @@ SIR_series <- function(parms,choices_list,aggregates,method="multilinear",grid_d
                                 aggregate_labor_supply = rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=final.time),
                                 aggregate_consumption = rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=final.time)) 
 
+    perceived_state <- state
+    mixing_probs <- c(1,0,0, 0,1,0, 0,0,1)
+
+    qre.tm.vec <- rep(NA,length.out=final.time)
+
     for(i in 2:final.time) {
-        if(method=="multilinear") {
+    perceived_state <- state
+
+    if(length(infolag_list)>0) {infolag <- infolag_vec[i]}
+        # if(method=="multilinear") {
             for(j in 1:length(types)) {
                 choices = choices_list$choices
                 agent_type = types[j]
-                labor_supply[j] = project_choices(agent_type, state, choices_list$grid_list, choices)
+
+                # apply information lag
+                if(length(infolag_list)>0) {
+                    if(i<=infolag&infolag>0) {
+                        perceived_state <- data.frame(S=S_0,I=I_0,R=R_0)
+                    }
+                    if(i>infolag&infolag>0) {
+                        perceived_state <- data.frame(S=output_series$S[(i-infolag)], I=output_series$I[(i-infolag)], R=output_series$R[(i-infolag)])
+                        # print("dink")
+                    }
+                }
+                if(("infolag"%in%names(parms))&(length(infolag_list)==0)) {
+                    if(i<=infolag&infolag>0) {
+                        perceived_state <- data.frame(S=S_0,I=I_0,R=R_0)
+                    }
+                    if(i>infolag&infolag>0) {
+                        perceived_state <- data.frame(S=output_series$S[(i-infolag)], I=output_series$I[(i-infolag)], R=output_series$R[(i-infolag)])
+                    }
+                }
+
+                # project choices
+                labor_supply[j] = project_choices(agent_type, perceived_state, choices_list$grid_list, choices)
+
+                if(is.null(fallback_choices_list)==FALSE) {
+                    # message("yeet")
+                    fallback_labor_supply[j] <- project_choices(agent_type, perceived_state, fallback_grid_list, fallback_choices)
+                }
+
+                if((length(policy_list>0))){
+                    if((policy_switch==1)) {
+                        if((i>=policy_start)&(i<=policy_stop)){
+                            labor_supply[j] = min(labor_supply[j],restricted_level)
+                        }
+                    }
+                }
             }
-        }
+        # }
+        
+        # message("Period ", i,". True state is: ", paste(state,","))
+        # message("Period ", i,". Perceived state is: ", paste(perceived_state,","))
 
         l_S = labor_supply$S
         l_I = labor_supply$I
+        l_R <- labor_supply$R
+
+        # Apply the test quality effect
+        if(length(tq_seq>0)) {
+            test_quality <- tq_seq[i]
+        }
+        # message("Period ", i,". Correct actions are: ", paste(labor_supply,","))
+        if(eqm_concept!="qre"){
+            l_S <- test_quality*l_S + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(labor_supply$S, labor_supply$I, labor_supply$R) )
+            l_I <- test_quality*l_I + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(labor_supply$S, labor_supply$I, labor_supply$R) )
+            l_R <- test_quality*l_R + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(labor_supply$S, labor_supply$I, labor_supply$R) )
+        }
+        if(eqm_concept=="qre") {
+            l_S <- labor_supply$S
+            l_I <- labor_supply$I
+            l_R <- labor_supply$R
+
+            probs <- mixing_probs # start with everyone playing last period's mix
+            choice_vector <- data.frame(S = l_S, I = l_I, R = l_R) # a choice vector of pure strats
+            lambda <- 1/(1-test_quality) - 1
+
+            message("Solving for QRE in period ",i,", lambda is ",round(lambda,2))
+            # message(probs)
+            # message(head(solved_values))
+            # message(choice_vector)
+            # message(perceived_state)
+            qre.tm <- as.numeric(proc.time()[3])
+            if(is.finite(lambda)){
+                mixing_probs <- optimParallel(par=probs, fn=qre_system, method="L-BFGS-B", lower=0, upper=1, lambda=lambda, payoffs_SIR=solved_values, problem_type=problem_type, choices=choice_vector, SIR_state=perceived_state, exog_parms=exog_parms)$par
+            }
+            if(!is.finite(lambda)){
+                mixing_probs <- c(1,0,0, 0,1,0, 0,0,1)
+            } 
+            qre.tm.vec[i] <- as.numeric(round(proc.time()[3] - qre.tm,2))
+            message("QRE solved! Time taken: ", qre.tm.vec[i])
+
+            mixing_prob_mat[i,] <- mixing_probs
+
+            # print(as.matrix(mixing_probs[1:3],nrow=1))
+            # print(as.matrix(choice_vector,ncol=1))
+            # as.numeric(choice_vector)
+
+            l_S <- sum(mixing_probs[1:3]*choice_vector)
+            l_I <- sum(mixing_probs[4:6]*choice_vector)
+            l_R <- sum(mixing_probs[7:9]*choice_vector)
+
+            # print(l_S)
+            # message("yeetfeet")
+        }
+
+        # Push the changes back to labor_supply
+        labor_supply$S <- as.numeric(l_S)
+        labor_supply$I <- as.numeric(l_I)
+        labor_supply$R <- as.numeric(l_R)
+        # message("Period ", i,". Chosen actions are: ", paste(labor_supply,","))
+
+        # Apply the compliance effect
+        if(is.null(fallback_choices_list)==FALSE) {
+            # message("Period ", i,". Compliant actions are: ", paste(labor_supply,","))
+            # message("yeet")
+
+            fallback_l_S <- test_quality*fallback_labor_supply$S + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(fallback_labor_supply$S, fallback_labor_supply$I, fallback_labor_supply$R) )
+            fallback_l_I <- test_quality*fallback_labor_supply$I + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(fallback_labor_supply$S, fallback_labor_supply$I, fallback_labor_supply$R) )
+            fallback_l_R <- test_quality*fallback_labor_supply$R + (1-test_quality)*( c(1/3,1/3,1/3)%*%c(fallback_labor_supply$S, fallback_labor_supply$I, fallback_labor_supply$R) )
+            # message("Non-compliant actions are: ", paste(c(fallback_l_S, fallback_l_I, fallback_l_R),","))
+
+            labor_supply$S <- compliance*l_S + (1-compliance)*fallback_labor_supply$S
+            labor_supply$I <- compliance*l_I + (1-compliance)*fallback_labor_supply$I
+            labor_supply$R <- compliance*l_R + (1-compliance)*fallback_labor_supply$R
+            # message("Period ", i,". Chosen actions are: ", paste(labor_supply,","))
+            
+            l_S <- labor_supply$S
+            l_I <- labor_supply$I
+            l_R <- labor_supply$R
+
+            if(eqm_concept=="qre") {
+                l_S <- fallback_labor_supply$S
+                l_I <- fallback_labor_supply$I
+                l_R <- fallback_labor_supply$R
+
+                probs <- mixing_probs # start with everyone playing last period's mix
+                choice_vector <- data.frame(S = l_S, I = l_I, R = l_R) # a choice vector of pure strats
+                # lambda <- pmin(1/(1-test_quality) - 1, 1e10)
+                lambda <- 1/(1-test_quality) - 1
+
+                message("Solving for fallback QRE in period ",i,", lambda is ",lambda)
+                qre.tm <- as.numeric(proc.time()[3])
+                if(is.finite(lambda)){
+                    mixing_probs <- optimParallel(par=probs, fn=qre_system, method="L-BFGS-B", lower=0, upper=1, lambda=lambda, payoffs_SIR=fallback_solved_values, problem_type=problem_type, choices=choice_vector, SIR_state=perceived_state, exog_parms=exog_parms)$par
+                }
+                if(!is.finite(lambda)){
+                    mixing_probs <- c(1,0,0, 0,1,0, 0,0,1)
+                }      
+                qre.tm.vec[i] <- as.numeric(round(proc.time()[3] - qre.tm,2))
+                message("Fallback QRE solved! Time taken: ", qre.tm.vec[i])
+
+                # print(as.matrix(mixing_probs[1:3],nrow=1))
+                # print(as.matrix(choice_vector,ncol=1))
+                # as.numeric(choice_vector)
+
+                l_S <- sum(mixing_probs[1:3]*choice_vector)
+                l_I <- sum(mixing_probs[4:6]*choice_vector)
+                l_R <- sum(mixing_probs[7:9]*choice_vector)
+
+                # print(l_S)
+                # message("yeetfeet")
+            }
+        }
+        
 
         c_S = w*l_S
         c_I = w*phi*l_I
+        c_R = w*l_R
 
         choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
 
@@ -267,278 +475,284 @@ SIR_series <- function(parms,choices_list,aggregates,method="multilinear",grid_d
                     other_contacts = rho_o)
     output_series = cbind(output_series, total_cases = cumsum(output_series$weekly_new_cases), aggregate_hours_deviation = 100*(output_series$aggregate_labor_supply/output_series$aggregate_labor_supply[1] - 1) , aggregate_consumption_deviation = 100*(output_series$aggregate_consumption/output_series$aggregate_consumption[1] - 1) )
 
+    output_series <- cbind(output_series,qre_times=qre.tm.vec,mixing_prob_mat)
+
+    if("eqm_concept"%in%names(parms)==TRUE) { 
+        stopCluster(cl)
+    }
+
     return(output_series)
 }
 
 
-SIR_series_policy <- function(parms,choices_list,aggregates,policy_list) {
-    w = parms$w
-    phi = parms$phi
-    final.time = parms$final.time
-    pi_r = parms$pi_r
-    pi_d = parms$pi_d
-    rho_c = parms$rho_c
-    rho_l = parms$rho_l
-    rho_o = parms$rho_o
-    kappa_c = parms$kappa_c
-    kappa_l = parms$kappa_l
+# SIR_series_policy <- function(parms,choices_list,aggregates,policy_list) {
+#     w = parms$w
+#     phi = parms$phi
+#     final.time = parms$final.time
+#     pi_r = parms$pi_r
+#     pi_d = parms$pi_d
+#     rho_c = parms$rho_c
+#     rho_l = parms$rho_l
+#     rho_o = parms$rho_o
+#     kappa_c = parms$kappa_c
+#     kappa_l = parms$kappa_l
 
-    S_0 = aggregates$S
-    I_0 = aggregates$I
-    R_0 = aggregates$R
-    D_0 = 1 - (S_0 + I_0 + R_0)
+#     S_0 = aggregates$S
+#     I_0 = aggregates$I
+#     R_0 = aggregates$R
+#     D_0 = 1 - (S_0 + I_0 + R_0)
 
-    policy_switch = policy_list$switch
-    policy_start = policy_list$start_date
-    policy_stop = policy_list$end_date
-    policy_labor_restriction = policy_list$labor_supply_level
-    policy_state_dependent = policy_list$state_dependent
+#     policy_switch = policy_list$switch
+#     policy_start = policy_list$start_date
+#     policy_stop = policy_list$end_date
+#     policy_labor_restriction = policy_list$labor_supply_level
+#     policy_state_dependent = policy_list$state_dependent
 
-    state = data.frame(S=S_0,I=I_0,R=R_0)
-    types = c("S","I","R")
-    labor_supply = data.frame(S=NA,I=NA,R=NA)
-    lifetime_utility = data.frame(S=NA,I=NA,R=NA)
+#     state = data.frame(S=S_0,I=I_0,R=R_0)
+#     types = c("S","I","R")
+#     labor_supply = data.frame(S=NA,I=NA,R=NA)
+#     lifetime_utility = data.frame(S=NA,I=NA,R=NA)
 
-    l_S0 = project_choices("S", state, choices_list$grid_list, choices_list$choices)
-    l_I0 = project_choices("I", state, choices_list$grid_list, choices_list$choices)
-    l_R0 = project_choices("R", state, choices_list$grid_list, choices_list$choices)
+#     l_S0 = project_choices("S", state, choices_list$grid_list, choices_list$choices)
+#     l_I0 = project_choices("I", state, choices_list$grid_list, choices_list$choices)
+#     l_R0 = project_choices("R", state, choices_list$grid_list, choices_list$choices)
 
-    restricted_level = l_S0*policy_labor_restriction
+#     restricted_level = l_S0*policy_labor_restriction
 
-    output_series = data.frame(S = rep(S_0,length.out=final.time),
-                                I = rep(I_0,length.out=final.time),
-                                R = rep(R_0,length.out=final.time),
-                                D = rep(D_0,length.out=final.time),
-                                labor_S = rep(l_S0,length.out=final.time),
-                                labor_I = rep(l_I0,length.out=final.time),
-                                labor_R = rep(l_R0,length.out=final.time),
-                                consumption_S = rep(w*l_S0,length.out=final.time),
-                                consumption_I = rep(w*phi*l_I0,length.out=final.time),
-                                consumption_R = rep(w*l_R0,length.out=final.time),
-                                aggregate_labor_supply = rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=final.time),
-                                aggregate_consumption = rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=final.time)) 
+#     output_series = data.frame(S = rep(S_0,length.out=final.time),
+#                                 I = rep(I_0,length.out=final.time),
+#                                 R = rep(R_0,length.out=final.time),
+#                                 D = rep(D_0,length.out=final.time),
+#                                 labor_S = rep(l_S0,length.out=final.time),
+#                                 labor_I = rep(l_I0,length.out=final.time),
+#                                 labor_R = rep(l_R0,length.out=final.time),
+#                                 consumption_S = rep(w*l_S0,length.out=final.time),
+#                                 consumption_I = rep(w*phi*l_I0,length.out=final.time),
+#                                 consumption_R = rep(w*l_R0,length.out=final.time),
+#                                 aggregate_labor_supply = rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=final.time),
+#                                 aggregate_consumption = rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=final.time)) 
 
-    for(i in 2:final.time) {
-        for(j in 1:length(types)) {
-            choices = choices_list$choices
-            agent_type = types[j]
-            labor_supply[j] = project_choices(agent_type, state, choices_list$grid_list, choices)
-            if((policy_switch==1)&(i>=policy_start)&(i<=policy_stop)) {
-                labor_supply[j] = min(labor_supply[j],restricted_level)
-            }
-        }
+#     for(i in 2:final.time) {
+#         for(j in 1:length(types)) {
+#             choices = choices_list$choices
+#             agent_type = types[j]
+#             labor_supply[j] = project_choices(agent_type, state, choices_list$grid_list, choices)
+#             if((policy_switch==1)&(i>=policy_start)&(i<=policy_stop)) {
+#                 labor_supply[j] = min(labor_supply[j],restricted_level)
+#             }
+#         }
 
-        l_S = labor_supply$S
-        l_I = labor_supply$I
+#         l_S = labor_supply$S
+#         l_I = labor_supply$I
 
-        c_S = w*l_S
-        c_I = w*phi*l_I
+#         c_S = w*l_S
+#         c_I = w*phi*l_I
 
-        choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
+#         choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
 
-        state = SIR_update(parms,choices,state)
-        choice_vector = data.frame(
-            labor_S = labor_supply$S, 
-            labor_I = labor_supply$I, 
-            labor_R = labor_supply$R,
-            consumption_S = w*labor_supply$S,
-            consumption_I = w*phi*labor_supply$I,
-            consumption_R = w*labor_supply$R)
-        aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
-        aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
+#         state = SIR_update(parms,choices,state)
+#         choice_vector = data.frame(
+#             labor_S = labor_supply$S, 
+#             labor_I = labor_supply$I, 
+#             labor_R = labor_supply$R,
+#             consumption_S = w*labor_supply$S,
+#             consumption_I = w*phi*labor_supply$I,
+#             consumption_R = w*labor_supply$R)
+#         aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
+#         aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
 
-        output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
-    }
+#         output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
+#     }
 
-    Reff_choices = data.frame(l_S=output_series$labor_S, l_I=output_series$labor_I, l_R=output_series$labor_R, c_S=output_series$consumption_S, c_I=output_series$consumption_I, c_R=output_series$consumption_R)
-    Reff_SIR = data.frame(S=output_series$S, I=output_series$I, R=output_series$R, D=output_series$D)
-    Reff = compute_R0(parms, Reff_choices, Reff_SIR)
+#     Reff_choices = data.frame(l_S=output_series$labor_S, l_I=output_series$labor_I, l_R=output_series$labor_R, c_S=output_series$consumption_S, c_I=output_series$consumption_I, c_R=output_series$consumption_R)
+#     Reff_SIR = data.frame(S=output_series$S, I=output_series$I, R=output_series$R, D=output_series$D)
+#     Reff = compute_R0(parms, Reff_choices, Reff_SIR)
 
-    output_series = cbind(output_series, 
-                weekly_new_cases = newly_infected(parms, Reff_choices, Reff_SIR),
-                newly_recovered = pi_r*output_series$I,
-                newly_dead = pi_d*output_series$I,
-                newly_infected_per_I = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I,
-                prob_infection_S = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$S,
-                infection_growth_rate = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I - pi_r - pi_d,
-                Reff = Reff,
-                consumption_contacts = rho_c*(output_series$consumption_S*output_series$consumption_I)^kappa_c,
-                labor_contacts = rho_l*(output_series$labor_S*output_series$labor_I)^kappa_l,
-                other_contacts = rho_o)
+#     output_series = cbind(output_series, 
+#                 weekly_new_cases = newly_infected(parms, Reff_choices, Reff_SIR),
+#                 newly_recovered = pi_r*output_series$I,
+#                 newly_dead = pi_d*output_series$I,
+#                 newly_infected_per_I = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I,
+#                 prob_infection_S = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$S,
+#                 infection_growth_rate = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I - pi_r - pi_d,
+#                 Reff = Reff,
+#                 consumption_contacts = rho_c*(output_series$consumption_S*output_series$consumption_I)^kappa_c,
+#                 labor_contacts = rho_l*(output_series$labor_S*output_series$labor_I)^kappa_l,
+#                 other_contacts = rho_o)
     
-    output_series = cbind(output_series, total_cases = cumsum(output_series$weekly_new_cases), aggregate_hours_deviation = 100*(output_series$aggregate_labor_supply/output_series$aggregate_labor_supply[1] - 1), aggregate_consumption_deviation = 100*(output_series$aggregate_consumption/output_series$aggregate_consumption[1] - 1))
+#     output_series = cbind(output_series, total_cases = cumsum(output_series$weekly_new_cases), aggregate_hours_deviation = 100*(output_series$aggregate_labor_supply/output_series$aggregate_labor_supply[1] - 1), aggregate_consumption_deviation = 100*(output_series$aggregate_consumption/output_series$aggregate_consumption[1] - 1))
 
-    return(output_series)
-}
+#     return(output_series)
+# }
 
 
 
-# function to generate important epi and econ series from solved policy functions and initial conditions for impulse response plots
-SIR_series_IRF <- function(parms,choices_list,aggregates,method="multilinear",grid_dfrm=NULL,impulse_parm=NULL,impulse_init=4,impulse_new=2,impulse_time=NULL, solved_values=NULL) {
-    w = parms$w
-    phi = parms$phi
-    final.time = parms$final.time
-    pi_r = parms$pi_r
-    pi_d = parms$pi_d
-    rho_c = impulse_init/(parms$Cbm)^2
-    rho_l = parms$rho_l
-    rho_o = parms$rho_o
+# # function to generate important epi and econ series from solved policy functions and initial conditions for impulse response plots
+# SIR_series_IRF <- function(parms,choices_list,aggregates,method="multilinear",grid_dfrm=NULL,impulse_parm=NULL,impulse_init=4,impulse_new=2,impulse_time=NULL, solved_values=NULL) {
+#     w = parms$w
+#     phi = parms$phi
+#     final.time = parms$final.time
+#     pi_r = parms$pi_r
+#     pi_d = parms$pi_d
+#     rho_c = impulse_init/(parms$Cbm)^2
+#     rho_l = parms$rho_l
+#     rho_o = parms$rho_o
 
-    # S_0 = aggregates$S
-    # I_0 = aggregates$I
-    # R_0 = aggregates$R
-    S_0 = aggregates[[1]]
-    I_0 = aggregates[[2]]
-    R_0 = aggregates[[3]]
-    D_0 = 1 - (S_0 + I_0 + R_0)
+#     # S_0 = aggregates$S
+#     # I_0 = aggregates$I
+#     # R_0 = aggregates$R
+#     S_0 = aggregates[[1]]
+#     I_0 = aggregates[[2]]
+#     R_0 = aggregates[[3]]
+#     D_0 = 1 - (S_0 + I_0 + R_0)
 
-    # state = c(S=S_0,I=I_0,R=R_0,benchmark_cons_contacts=impulse_init)
-    state = c(S=S_0,I=I_0,R=R_0)
-    types = c("S","I","R")
-    labor_supply = data.frame(S=NA,I=NA,R=NA)
-    lifetime_utility = data.frame(S=NA,I=NA,R=NA)
+#     # state = c(S=S_0,I=I_0,R=R_0,benchmark_cons_contacts=impulse_init)
+#     state = c(S=S_0,I=I_0,R=R_0)
+#     types = c("S","I","R")
+#     labor_supply = data.frame(S=NA,I=NA,R=NA)
+#     lifetime_utility = data.frame(S=NA,I=NA,R=NA)
 
-    l_S = solved_values$labor_supply_S[which(solved_values$benchmark_cons_contacts==impulse_init)]
-    l_I = solved_values$labor_supply_I[which(solved_values$benchmark_cons_contacts==impulse_init)]
-    l_R = solved_values$labor_supply_R[which(solved_values$benchmark_cons_contacts==impulse_init)]
+#     l_S = solved_values$labor_supply_S[which(solved_values$benchmark_cons_contacts==impulse_init)]
+#     l_I = solved_values$labor_supply_I[which(solved_values$benchmark_cons_contacts==impulse_init)]
+#     l_R = solved_values$labor_supply_R[which(solved_values$benchmark_cons_contacts==impulse_init)]
 
-    l_S_fn = ipol(l_S, grid=grid_list, method="multilinear")
-    l_I_fn = ipol(l_I, grid=grid_list, method="multilinear")
-    l_R_fn = ipol(l_R, grid=grid_list, method="multilinear")
-    l_S0 = l_S_fn(state)
-    l_I0 = l_I_fn(state)
-    l_R0 = l_R_fn(state)
+#     l_S_fn = ipol(l_S, grid=grid_list, method="multilinear")
+#     l_I_fn = ipol(l_I, grid=grid_list, method="multilinear")
+#     l_R_fn = ipol(l_R, grid=grid_list, method="multilinear")
+#     l_S0 = l_S_fn(state)
+#     l_I0 = l_I_fn(state)
+#     l_R0 = l_R_fn(state)
 
-    output_series = data.frame(S = rep(S_0,length.out=final.time),
-                                I = rep(I_0,length.out=final.time),
-                                R = rep(R_0,length.out=final.time),
-                                D = rep(D_0,length.out=final.time),
-                                labor_S = rep(l_S0,length.out=final.time),
-                                labor_I = rep(l_I0,length.out=final.time),
-                                labor_R = rep(l_R0,length.out=final.time),
-                                consumption_S = rep(w*l_S0,length.out=final.time),
-                                consumption_I = rep(w*phi*l_I0,length.out=final.time),
-                                consumption_R = rep(w*l_R0,length.out=final.time),
-                                aggregate_labor_supply = rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=final.time),
-                                aggregate_consumption = rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=final.time)) 
+#     output_series = data.frame(S = rep(S_0,length.out=final.time),
+#                                 I = rep(I_0,length.out=final.time),
+#                                 R = rep(R_0,length.out=final.time),
+#                                 D = rep(D_0,length.out=final.time),
+#                                 labor_S = rep(l_S0,length.out=final.time),
+#                                 labor_I = rep(l_I0,length.out=final.time),
+#                                 labor_R = rep(l_R0,length.out=final.time),
+#                                 consumption_S = rep(w*l_S0,length.out=final.time),
+#                                 consumption_I = rep(w*phi*l_I0,length.out=final.time),
+#                                 consumption_R = rep(w*l_R0,length.out=final.time),
+#                                 aggregate_labor_supply = rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=final.time),
+#                                 aggregate_consumption = rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=final.time)) 
 
-    print(l_S_fn(c(0.99,0.01,0)))
-    print(parms)
+#     print(l_S_fn(c(0.99,0.01,0)))
+#     print(parms)
 
-    choices = choices_list$choices
-    for(i in 2:(impulse_time-1)) {
-        if(method=="multilinear") {
-            for(j in 1:length(types)) {
-                # if(i>=impulse_time) state[4] = impulse_new
+#     choices = choices_list$choices
+#     for(i in 2:(impulse_time-1)) {
+#         if(method=="multilinear") {
+#             for(j in 1:length(types)) {
+#                 # if(i>=impulse_time) state[4] = impulse_new
                 
-                agent_type = types[j]
-                # print(state)
-                state = as.numeric(state)
-                if(agent_type=="S") labor_supply[j] = l_S_fn(state)
-                if(agent_type=="I") labor_supply[j] = l_I_fn(state)
-                if(agent_type=="R") labor_supply[j] = l_R_fn(state)
-                # print(paste0("worked ",i))
-                # print(labor_supply$S)
-            }
-            # print("Collect 200")
-        }
+#                 agent_type = types[j]
+#                 # print(state)
+#                 state = as.numeric(state)
+#                 if(agent_type=="S") labor_supply[j] = l_S_fn(state)
+#                 if(agent_type=="I") labor_supply[j] = l_I_fn(state)
+#                 if(agent_type=="R") labor_supply[j] = l_R_fn(state)
+#                 # print(paste0("worked ",i))
+#                 # print(labor_supply$S)
+#             }
+#             # print("Collect 200")
+#         }
 
-        l_S = labor_supply$S
-        l_I = labor_supply$I
+#         l_S = labor_supply$S
+#         l_I = labor_supply$I
 
-        # print("Collect 400")
+#         # print("Collect 400")
 
-        c_S = w*l_S
-        c_I = w*phi*l_I
+#         c_S = w*l_S
+#         c_I = w*phi*l_I
 
-        choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
+#         choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
 
-        # state_old = data.frame(S = state[1], I = state[2], R = state[3], benchmark_cons_contacts = state[4])
-        # state = SIR_update(parms,choices,state_old)
-        # print(state)
-        state = data.frame(S = state[1], I = state[2], R = state[3])
-        state = SIR_update(parms,choices,state)
-        state = state[1:3]
-        # state[4] = state_old[4]
-        # print(state)
-        choice_vector = data.frame(
-            labor_S = labor_supply$S, 
-            labor_I = labor_supply$I, 
-            labor_R = labor_supply$R,
-            consumption_S = w*labor_supply$S,
-            consumption_I = w*phi*labor_supply$I,
-            consumption_R = w*labor_supply$R)
-        aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
-        aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
+#         # state_old = data.frame(S = state[1], I = state[2], R = state[3], benchmark_cons_contacts = state[4])
+#         # state = SIR_update(parms,choices,state_old)
+#         # print(state)
+#         state = data.frame(S = state[1], I = state[2], R = state[3])
+#         state = SIR_update(parms,choices,state)
+#         state = state[1:3]
+#         # state[4] = state_old[4]
+#         # print(state)
+#         choice_vector = data.frame(
+#             labor_S = labor_supply$S, 
+#             labor_I = labor_supply$I, 
+#             labor_R = labor_supply$R,
+#             consumption_S = w*labor_supply$S,
+#             consumption_I = w*phi*labor_supply$I,
+#             consumption_R = w*labor_supply$R)
+#         aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
+#         aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
 
-        output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
-    }
+#         output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
+#     }
 
-    l_S = solved_values$labor_supply_S[which(solved_values$benchmark_cons_contacts==impulse_new)]
-    l_I = solved_values$labor_supply_I[which(solved_values$benchmark_cons_contacts==impulse_new)]
-    l_R = solved_values$labor_supply_R[which(solved_values$benchmark_cons_contacts==impulse_new)]
-    l_S_fn = ipol(l_S, grid=grid_list, method="multilinear")
-    l_I_fn = ipol(l_I, grid=grid_list, method="multilinear")
-    l_R_fn = ipol(l_R, grid=grid_list, method="multilinear")
-    parms$rho_c = impulse_new/(parms$Cbm)^2
+#     l_S = solved_values$labor_supply_S[which(solved_values$benchmark_cons_contacts==impulse_new)]
+#     l_I = solved_values$labor_supply_I[which(solved_values$benchmark_cons_contacts==impulse_new)]
+#     l_R = solved_values$labor_supply_R[which(solved_values$benchmark_cons_contacts==impulse_new)]
+#     l_S_fn = ipol(l_S, grid=grid_list, method="multilinear")
+#     l_I_fn = ipol(l_I, grid=grid_list, method="multilinear")
+#     l_R_fn = ipol(l_R, grid=grid_list, method="multilinear")
+#     parms$rho_c = impulse_new/(parms$Cbm)^2
 
-    print(l_S_fn(c(0.99,0.01,0)))
+#     print(l_S_fn(c(0.99,0.01,0)))
 
-    for(i in impulse_time:final.time) {
-        if(method=="multilinear") {
-            for(j in 1:length(types)) {
+#     for(i in impulse_time:final.time) {
+#         if(method=="multilinear") {
+#             for(j in 1:length(types)) {
                 
-                agent_type = types[j]
-                state = as.numeric(state)
-                if(agent_type=="S") labor_supply[j] = l_S_fn(state)
-                if(agent_type=="I") labor_supply[j] = l_I_fn(state)
-                if(agent_type=="R") labor_supply[j] = l_R_fn(state)
-            }
-        }
+#                 agent_type = types[j]
+#                 state = as.numeric(state)
+#                 if(agent_type=="S") labor_supply[j] = l_S_fn(state)
+#                 if(agent_type=="I") labor_supply[j] = l_I_fn(state)
+#                 if(agent_type=="R") labor_supply[j] = l_R_fn(state)
+#             }
+#         }
 
-        l_S = labor_supply$S
-        l_I = labor_supply$I
+#         l_S = labor_supply$S
+#         l_I = labor_supply$I
 
-        c_S = w*l_S
-        c_I = w*phi*l_I
+#         c_S = w*l_S
+#         c_I = w*phi*l_I
 
-        choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
+#         choices = data.frame(c_S = c_S, c_I = c_I, l_S = l_S, l_I = l_I)
 
-        state = data.frame(S = state[1], I = state[2], R = state[3])
-        state = SIR_update(parms,choices,state)
-        state = state[1:3]
-        choice_vector = data.frame(
-            labor_S = labor_supply$S, 
-            labor_I = labor_supply$I, 
-            labor_R = labor_supply$R,
-            consumption_S = w*labor_supply$S,
-            consumption_I = w*phi*labor_supply$I,
-            consumption_R = w*labor_supply$R)
-        aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
-        aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
+#         state = data.frame(S = state[1], I = state[2], R = state[3])
+#         state = SIR_update(parms,choices,state)
+#         state = state[1:3]
+#         choice_vector = data.frame(
+#             labor_S = labor_supply$S, 
+#             labor_I = labor_supply$I, 
+#             labor_R = labor_supply$R,
+#             consumption_S = w*labor_supply$S,
+#             consumption_I = w*phi*labor_supply$I,
+#             consumption_R = w*labor_supply$R)
+#         aggregate_labor_supply = labor_supply$S*state$S + labor_supply$I*state$I + labor_supply$R*state$R
+#         aggregate_consumption = choice_vector$consumption_S*state$S + choice_vector$consumption_I*state$I + choice_vector$consumption_R*state$R
 
-        output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
-    }
+#         output_series[i,] = c(state, choice_vector, aggregate_labor_supply, aggregate_consumption)
+#     }
 
-    Reff_choices = data.frame(l_S=output_series$labor_S, l_I=output_series$labor_I, l_R=output_series$labor_R, c_S=output_series$consumption_S, c_I=output_series$consumption_I, c_R=output_series$consumption_R)
-    Reff_SIR = data.frame(S=output_series$S, I=output_series$I, R=output_series$R, D=output_series$D)
-    Reff = compute_R0(parms, Reff_choices, Reff_SIR)
+#     Reff_choices = data.frame(l_S=output_series$labor_S, l_I=output_series$labor_I, l_R=output_series$labor_R, c_S=output_series$consumption_S, c_I=output_series$consumption_I, c_R=output_series$consumption_R)
+#     Reff_SIR = data.frame(S=output_series$S, I=output_series$I, R=output_series$R, D=output_series$D)
+#     Reff = compute_R0(parms, Reff_choices, Reff_SIR)
 
-    output_series = cbind(output_series, 
-                    weekly_new_cases = newly_infected(parms, Reff_choices, Reff_SIR),
-                    newly_recovered = pi_r*output_series$I,
-                    newly_dead = pi_d*output_series$I,
-                    newly_infected_per_I = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I,
-                    prob_infection_S = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$S,
-                    infection_growth_rate = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I - pi_r - pi_d,
-                    Reff = Reff,
-                    consumption_contacts = rho_c*output_series$consumption_S*output_series$consumption_I,
-                    labor_contacts = rho_l*output_series$labor_S*output_series$labor_I,
-                    other_contacts = rho_o)
-    output_series = cbind(output_series, total_cases = cumsum(output_series$weekly_new_cases), aggregate_hours_deviation = 100*(output_series$aggregate_labor_supply/output_series$aggregate_labor_supply[1] - 1) , aggregate_consumption_deviation = 100*(output_series$aggregate_consumption/output_series$aggregate_consumption[1] - 1) )
+#     output_series = cbind(output_series, 
+#                     weekly_new_cases = newly_infected(parms, Reff_choices, Reff_SIR),
+#                     newly_recovered = pi_r*output_series$I,
+#                     newly_dead = pi_d*output_series$I,
+#                     newly_infected_per_I = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I,
+#                     prob_infection_S = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$S,
+#                     infection_growth_rate = newly_infected(parms, Reff_choices, Reff_SIR)/output_series$I - pi_r - pi_d,
+#                     Reff = Reff,
+#                     consumption_contacts = rho_c*output_series$consumption_S*output_series$consumption_I,
+#                     labor_contacts = rho_l*output_series$labor_S*output_series$labor_I,
+#                     other_contacts = rho_o)
+#     output_series = cbind(output_series, total_cases = cumsum(output_series$weekly_new_cases), aggregate_hours_deviation = 100*(output_series$aggregate_labor_supply/output_series$aggregate_labor_supply[1] - 1) , aggregate_consumption_deviation = 100*(output_series$aggregate_consumption/output_series$aggregate_consumption[1] - 1) )
 
-    return(output_series)
-}
+#     return(output_series)
+# }
 
 # steady-state utility function
 ss_utility <- function(args, discount_factor) {
@@ -652,6 +866,227 @@ dynamic_TU_wrapper <- function(choice, parms, benchmarks, state) {
 
     return(value)
 }
+
+# # function to calculate logit quantal response function with three player types. probs should be a 2kx1 vector and payoffs should be a kx3k matrix. k is the number of choices (3 -- l_S, l_I, l_R). Compute the payoffs assuming everyone's choices from the pre_value_fn. payoffs should be an object with named rows and columns.
+lqrf <- function(lambda, payoffs, probs, action_type) {
+
+    probs_1 <- matrix(probs[1:3]) # column vector
+    probs_2 <- t(matrix(probs[4:6])) # row vector
+
+    probs_mat <- probs_1%*%probs_2
+
+    probs_num <- as.vector(probs_mat)
+    payoffs_num <- as.matrix(payoffs)
+
+    # print(sum(probs_num))
+
+    expected_payoffs <- payoffs_num%*%probs_num
+    noised_EP <- lambda*expected_payoffs
+    exp_EU <- exp(noised_EP)
+
+    evaluated_action <- which(rownames(payoffs)==action_type)
+    # print(evaluated_action)
+
+    # output <- exp(noised_EP[evaluated_action])/sum(exp(noised_EP)) # brute calc -- vulnerable to overflow. payoff differences are better here, less vulnerable
+
+    payoff_diffs_wrt_evaluated_action <- as.numeric(noised_EP) - as.numeric(noised_EP[evaluated_action])
+    den <- sum(exp(payoff_diffs_wrt_evaluated_action))
+
+
+    output <- 1/den
+    if(is.na(den==TRUE)) {output <- 0}
+
+    # print(output)
+
+    return(output)
+}
+
+# lambda <- 1000
+# payoffs <- data.frame(I_playing_S = c(5,4), I_playing_I = c(3,3))
+# rownames(payoffs) = c("S_playing_S", "S_playing_I")
+# probs <- c(0.9,0.1)
+# action_type <- "S_playing_S"
+# lqrf(lambda, payoffs, probs, action_type)
+
+# # solver to calculate a QRE given: an initial vector of choice probabilities "choice probs" (1x9), a noise parameter "lambda" (1x1), a matrix with the solved value functions for each type "payoffs_SIR" (ngridpts x 6, 3 for the states and 3 for the values), choices being mixed between "choices" (1x3), and current state of the system "SIR_state". Outputs a 1x9 vector of imbalances. When plugged into nleqslv it produces a 1x9 vector of mixing probabilities (1x3 for each type, across all three type-specific actions).
+qre_system <- function(choice_probs, lambda, payoffs_SIR, problem_type="eqm", choices, SIR_state, exog_parms) {
+    ### set up initial choice probabilities
+    #### S
+    S_choice_probs_S <- choice_probs[1]
+    S_choice_probs_I <- choice_probs[2]
+    S_choice_probs_R <- choice_probs[3]
+    S_probs <- c(S_choice_probs_S, S_choice_probs_I, S_choice_probs_R)
+    #### I
+    I_choice_probs_S <- choice_probs[4]
+    I_choice_probs_I <- choice_probs[5]
+    I_choice_probs_R <- choice_probs[6]
+    I_probs <- c(I_choice_probs_S, I_choice_probs_I, I_choice_probs_R)
+    #### R
+    R_choice_probs_S <- choice_probs[7]
+    R_choice_probs_I <- choice_probs[8]
+    R_choice_probs_R <- choice_probs[9]
+    R_probs <- c(R_choice_probs_S, R_choice_probs_I, R_choice_probs_R)
+
+    #### others' choice probs to go into the lqrfs. each should be a 6x1 vector which contains the 3x1 vectors for the other two types.
+    SR_choice_probs <- c(S_choice_probs_S, S_choice_probs_I, S_choice_probs_R, R_choice_probs_S, R_choice_probs_I, R_choice_probs_R)
+    IR_choice_probs <- c(I_choice_probs_S, I_choice_probs_I, I_choice_probs_R, R_choice_probs_S, R_choice_probs_I, R_choice_probs_R)
+    SI_choice_probs <- c(S_choice_probs_S, S_choice_probs_I, S_choice_probs_R, I_choice_probs_S, I_choice_probs_I, I_choice_probs_R)
+
+    ### construct mixed strategies using choice probabilities
+    l_S <- as.matrix(S_probs)%*%as.matrix(choices)
+    l_I <- as.matrix(I_probs)%*%as.matrix(choices)
+    l_R <- as.matrix(R_probs)%*%as.matrix(choices)
+
+    ## compute payoff matrix for each type
+    ### In the decentralized problems, people use their own value functions to choose their mixtures. The LQRF here represents that they are uncertain over their state, and so their "signal" regarding which value function to use is contaminated by noise (since the test isn't a strong enough signal to overwhelm the noise). They have some private information which helps them determine their type, and the better the test is the more effectively they're able to combine it with their private information to determine their type and the corresponding appropriate action. What's interesting is that there's a test quality < 1 where the S types decide the evidence is strong enough and play their proper action.
+    if(problem_type=="eqm"){ 
+        payoffs_S <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="S") 
+        payoffs_I <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="I") 
+        payoffs_R <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="R") 
+    }
+    ### Under the coordinated problem, we've solved the incentives and people want to do whatever maximizes the SWF -- they just don't know what their type is, and so have trouble determining which action from them would maximize the SWF.
+    if(problem_type=="plan"){ 
+        payoffs_S <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="S", problem_type="plan") 
+        payoffs_I <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="I", problem_type="plan") 
+        payoffs_R <- compute_payoff_matrix(choices, payoffs=payoffs_SIR, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="R", problem_type="plan") 
+    }
+
+
+    rownames(payoffs_S) <- c("S_playing_S", "S_playing_I", "S_playing_R")
+    rownames(payoffs_I) <- c("I_playing_S", "I_playing_I", "I_playing_R")
+    rownames(payoffs_R) <- c("R_playing_S", "R_playing_I", "R_playing_R")
+
+    # print(payoffs_S)
+    # print(payoffs_I)
+    # print(payoffs_R)
+
+    ### calculate lqrf choice probabilities
+    # if(is.finite(lambda)){
+        #### S
+        S_choice_probs_S_update <- lqrf(lambda, payoffs_S, IR_choice_probs, "S_playing_S")
+        S_choice_probs_I_update <- lqrf(lambda, payoffs_S, IR_choice_probs, "S_playing_I")
+        S_choice_probs_R_update <- 1 - S_choice_probs_S_update - S_choice_probs_I_update
+        #### I
+        I_choice_probs_S_update <- lqrf(lambda, payoffs_I, SR_choice_probs, "I_playing_S")
+        I_choice_probs_I_update <- lqrf(lambda, payoffs_I, SR_choice_probs, "I_playing_I")
+        # print(I_choice_probs_S_update)
+        # print(I_choice_probs_I_update)
+        I_choice_probs_R_update <- 1 - I_choice_probs_S_update - I_choice_probs_I_update
+        #### R
+        R_choice_probs_S_update <- lqrf(lambda, payoffs_R, SI_choice_probs, "R_playing_S")
+        R_choice_probs_I_update <- lqrf(lambda, payoffs_R, SI_choice_probs, "R_playing_I")
+        R_choice_probs_R_update <- 1 - R_choice_probs_S_update - R_choice_probs_I_update
+    # }
+
+    # if(!is.finite(lambda)) {
+    #     S_choice_probs_S_update <- 1
+    #     S_choice_probs_I_update <- 0
+    #     S_choice_probs_R_update <- 0
+
+    #     I_choice_probs_S_update <- 0
+    #     I_choice_probs_I_update <- 1
+    #     I_choice_probs_R_update <- 0
+
+    #     R_choice_probs_S_update <- 0
+    #     R_choice_probs_I_update <- 0
+    #     R_choice_probs_R_update <- 1
+    # }
+
+    # print(c(S_choice_probs_S_update, S_choice_probs_I_update, S_choice_probs_R_update,
+        # I_choice_probs_S_update, I_choice_probs_I_update, I_choice_probs_R_update,
+        # R_choice_probs_S_update, R_choice_probs_I_update, R_choice_probs_R_update))
+
+    ### calculate squared imbalances
+    #### S
+    S_imbalance_S <- (S_choice_probs_S - S_choice_probs_S_update)^2 
+    S_imbalance_I <- (S_choice_probs_I - S_choice_probs_I_update)^2
+    S_imbalance_R <- (S_choice_probs_R - S_choice_probs_R_update)^2
+    #### I
+    I_imbalance_S <- (I_choice_probs_S - I_choice_probs_S_update)^2 
+    I_imbalance_I <- (I_choice_probs_I - I_choice_probs_I_update)^2
+    I_imbalance_R <- (I_choice_probs_R - I_choice_probs_R_update)^2
+    #### R
+    R_imbalance_S <- (R_choice_probs_S - R_choice_probs_S_update)^2 
+    R_imbalance_I <- (R_choice_probs_I - R_choice_probs_I_update)^2
+    R_imbalance_R <- (R_choice_probs_R - R_choice_probs_R_update)^2
+    ### total
+    total_imbalance <- S_imbalance_S + S_imbalance_I + S_imbalance_R + I_imbalance_S + I_imbalance_I + I_imbalance_R + R_imbalance_S + R_imbalance_I + R_imbalance_R
+    # probability_penalty <- (1 - (S_choice_probs_S_update + S_choice_probs_I_update + S_choice_probs_R_update))^2 + (1 - (I_choice_probs_S_update + I_choice_probs_I_update + I_choice_probs_R_update))^2 + (1 - (R_choice_probs_S_update + R_choice_probs_I_update + R_choice_probs_R_update))^2 
+
+    # print(total_imbalance)
+    # print(probability_penalty)
+    loss <- total_imbalance
+    # loss <- total_imbalance + probability_penalty
+
+    # return(c(S_imbalance_S, S_imbalance_I, S_imbalance_R, I_imbalance_S, I_imbalance_I, I_imbalance_R, R_imbalance_S, R_imbalance_I, R_imbalance_R)) # use with nleqslv
+    return(loss) # use with optim
+}
+
+# lambda <- 1
+# probs <- c(1,0,0, 0,1,0, 0,0,1)
+# qre_system(choice_probs=probs, lambda=lambda, payoffs_SIR=eqm_vpfn, choices=data.frame(S = 7, I = 4, R = 8), SIR_state=SIR_init, exog_parms=exog_parms)
+
+# # nleqslv(x=probs, fn=qre_system, lambda=lambda, payoffs_SIR=eqm_vpfn, choices=data.frame(S = 7, I = 4, R = 8), SIR_state=SIR_init, exog_parms=exog_parms)
+
+# optim(par=probs, fn=qre_system, method="L-BFGS-B", lower=0, upper=1, lambda=100, payoffs_SIR=eqm_vpfn, choices=data.frame(S = 7.99, I = 7.72, R = 7.99), SIR_state=SIR_init, exog_parms=exog_parms)
+# optim(par=probs, fn=qre_system, method="L-BFGS-B", lower=0, upper=1, lambda=100, payoffs_SIR=eqm_vpfn, choices=data.frame(S = eqm_vpfn$labor_supply_S[50], I = eqm_vpfn$labor_supply_I[50], R = eqm_vpfn$labor_supply_R[50]), SIR_state=data.frame(S=eqm_vpfn$S[50],I=eqm_vpfn$I[50],R=eqm_vpfn$R[50] ), exog_parms=exog_parms)
+
+# Computes the payoff matrix for an agent from choosing one of three actions given all the possibilities for the other players. "own_choice" is a 1x1 of what the current type will choose, "others_choices" is a 1x2 vector of what the others will choose. "payoffs" should be a long nx4 of the own-type value function at each state (3 for the state, 1 for the value). "exog_parms" is the vector of exogenous parameters, "SIR_state" is a 1x3 of the current disease state, "agent_type" is a 1x1 character from {S,I,R}, "grid_list" is a list of the grid used for the payoffs, "contval_list" is a list of the value function. The output of this should be a 3x9 matrix.
+# The choices going in should already be probability-weighted. No probability-weighting happens inside here. "choices" should be a dataframe with three named columns, S I R, and be 1x3.
+compute_payoff_matrix <- function(choices, payoffs, exog_parms, SIR_state, grid_list, agent_type, problem_type="eqm") {
+
+    contval_list = list(S=payoffs$lifetime_utility_S, I=payoffs$lifetime_utility_I, R=payoffs$lifetime_utility_R, SWF=payoffs$SWF)
+
+    all_choices <- data.frame(S=NA,I=NA,R=NA)
+
+    U_ijS <- matrix(NA,nrow=3,ncol=3)
+    U_ijI <- matrix(NA,nrow=3,ncol=3)
+    U_ijR <- matrix(NA,nrow=3,ncol=3)
+
+    for(i in 1:ncol(choices)){
+        for(j in 1:ncol(choices)){
+            for(k in 1:ncol(choices)) {
+                all_choices$S <- as.numeric(choices[i])
+                all_choices$I <- as.numeric(choices[j])
+                all_choices$R <- as.numeric(choices[k])
+                if(problem_type=="eqm"){
+                    choice <- as.numeric(all_choices[agent_type])
+                    if(k==1) {U_ijS[i,j] <- pre_value_fn(choice, exog_parms, all_choices, SIR_state, agent_type, grid_list, contval_list)}
+                    if(k==2) {U_ijI[i,j] <- pre_value_fn(choice, exog_parms, all_choices, SIR_state, agent_type, grid_list, contval_list)}
+                    if(k==3) {U_ijR[i,j] <- pre_value_fn(choice, exog_parms, all_choices, SIR_state, agent_type, grid_list, contval_list)}
+                }
+                if(problem_type=="plan"){
+                    if(k==1) {U_ijS[i,j] <- pre_value_fn_planner(all_choices, exog_parms, SIR_state,grid_list, contval_list)}
+                    if(k==2) {U_ijI[i,j] <- pre_value_fn_planner(all_choices, exog_parms, SIR_state,grid_list, contval_list)}
+                    if(k==3) {U_ijR[i,j] <- pre_value_fn_planner(all_choices, exog_parms, SIR_state,grid_list, contval_list)}
+                }
+                
+            } 
+        } 
+    }
+
+    if(agent_type=="S") { U_ijk <- as.matrix(cbind(U_ijS, U_ijI, U_ijR)) }
+    if(agent_type=="I") { U_ijk <- as.matrix(cbind(t(U_ijS), t(U_ijI), t(U_ijR))) }
+    if(agent_type=="R") { U_ijk <- as.matrix(rbind( as.vector(U_ijS), as.vector(U_ijI), as.vector(U_ijR) )) }
+
+    return(U_ijk)
+}
+
+# choices <- data.frame(S = eqm_vpfn$labor_supply_S[50], I = eqm_vpfn$labor_supply_I[50], R = eqm_vpfn$labor_supply_R[50])
+# choices <- data.frame(S = 7, I = 4, R = 8)
+# SIR_state <- data.frame(S=0.49, I=0.01, R=0.5)
+
+# compute_payoff_matrix(choices, payoffs=eqm_vpfn, exog_parms=exog_parms, SIR_state=SIR_state, grid_list=grid_list, agent_type="S") 
+
+# probs <- c(0.8,0.1,0.1, 0.1,0.8,0.1, 0.1,0.1,0.8)
+# payoffs_S <- data.frame(I_playing_S = c(5,4,3), I_playing_I = c(3,3,3), I_playing_R = c(3,3,3))
+# rownames(payoffs_S) = c("S_playing_S", "S_playing_I", "S_playing_R")
+# payoffs_I <- data.frame(S_playing_I = c(3,5,3), S_playing_S = c(4,5,3), S_playing_R = c(2,2,2))
+# rownames(payoffs_I) = c("I_playing_S", "I_playing_I", "I_playing_R")
+# payoffs_S
+# payoffs_I
+
+# nleqslv(probs, qre_system, payoffs_S = payoffs_S, payoffs_I = payoffs_I, lambda = 1000)
 
 project_SIR_outcome <- function(SIR_state, grid_list, target) {
     state = as.matrix(SIR_state)
@@ -1079,9 +1514,9 @@ pre_value_fn <- function(choice, exog_parms, others_choices, SIR_state, agent_ty
         c = w*l
     }
 
-    c_S = w*l_S
-    c_I = w*phi*l_I
-    c_R = w*l_R
+    c_S = as.numeric(w*l_S)
+    c_I = as.numeric(w*phi*l_I)
+    c_R = as.numeric(w*l_R)
     C = c_S*S + c_I*I + c_R*R
     L = l_S*S + l_I*I + l_R*R
 
@@ -1135,7 +1570,11 @@ pre_value_fn_planner <- function(choices, exog_parms, SIR_state, grid_list, cont
     w = exog_parms$w
     U_D = exog_parms$udeath
 
+    caseload_wt <- exog_parms$caseload_wt
+
     plannertype = exog_parms$plannertype
+
+    objective_type <- exog_parms$objective_type
 
     # current SIR state
     S = SIR_state$S
@@ -1164,14 +1603,19 @@ pre_value_fn_planner <- function(choices, exog_parms, SIR_state, grid_list, cont
     # print(aggregates)
     # print(tau_jt)
 
-    value_S = total_utility(c_S,l_S,C,L,gamma_c,gamma_l,rho_c,rho_l,risk_aversion,s,alpha_U,Lbar) + discount_factor*((1-tau_jt)*continuation_value(SIR_, grid_list, contval_list$S) + tau_jt*continuation_value(SIR_, grid_list, contval_list$I))
+    if(exog_parms$caseload_type=="linear") {caseload_cost <- 1 - caseload_wt*I}
+    if(exog_parms$caseload_type=="convex") {caseload_cost <- 1 - caseload_wt*exp(I)}
 
-    value_I = total_utility(c_I,l_I,C,L,gamma_c,gamma_l,rho_c,rho_l,risk_aversion,s,alpha_U,Lbar) + discount_factor*((1-pi_r-pi_d)*continuation_value(SIR_, grid_list, contval_list$I) + pi_r*continuation_value(SIR_, grid_list, contval_list$R)) + pi_d*U_D
+    value_S = total_utility(c_S,l_S,C,L,gamma_c,gamma_l,rho_c,rho_l,risk_aversion,s,alpha_U,Lbar)*caseload_cost + discount_factor*((1-tau_jt)*continuation_value(SIR_, grid_list, contval_list$S) + tau_jt*continuation_value(SIR_, grid_list, contval_list$I))
+
+    value_I = total_utility(c_I,l_I,C,L,gamma_c,gamma_l,rho_c,rho_l,risk_aversion,s,alpha_U,Lbar)*caseload_cost + discount_factor*((1-pi_r-pi_d)*continuation_value(SIR_, grid_list, contval_list$I) + pi_r*continuation_value(SIR_, grid_list, contval_list$R)) + pi_d*U_D
 
     value_R = total_utility(c_R,l_R,C,L,gamma_c,gamma_l,rho_c,rho_l,risk_aversion,s,alpha_U,Lbar) + discount_factor*(continuation_value(SIR_, grid_list, contval_list$R))
 
-    if(plannertype=="unweighted") {value = value_S + value_I + value_R}
-    if(plannertype=="weighted") {value = S*value_S + I*value_I + R*value_R}
+    # if(plannertype=="unweighted") {value = value_S + value_I + value_R}
+    # if(plannertype=="weighted") {value = S*value_S + I*value_I + R*value_R}
+    if(objective_type=="welfare") {value = S*value_S + I*value_I + R*value_R}
+    if(objective_type=="cases") { value = SIR_$I }
 
     return( value )
 }
@@ -1255,143 +1699,151 @@ build_grid <- function(Sgridlength, Igridlength, Rgridlength, cheby=0) {
 }
 
 # wrapper for SIR_series. generates a time series of SIR outcomes from a dataframe of policy functions
-generate_time_series <- function(solved_values, interpolator="multilinear", grid_dfrm=NULL,...) {
+generate_time_series <- function(solved_values, interpolator="multilinear", grid_dfrm=NULL, infolag_list=NULL, fallback_solved_values=NULL, policy_list=NULL, ...) {
     others_choices = data.frame(l_S = solved_values$labor_supply_S, l_I = solved_values$labor_supply_I, l_R = solved_values$labor_supply_R, simplex_check=simplex_check)
-
-    others_utilities = data.frame(u_S = solved_values$lifetime_utility_S, l_I = solved_values$lifetime_utility_I, l_R = solved_values$lifetime_utility_R)
-
-    choices_list = list(grid_list = grid_list, choices = others_choices, utilities = others_utilities)
-    projection = SIR_series(exog_parms, choices_list, SIR_init, method=interpolator, grid_dfrm=grid_dfrm)
-
-    results = cbind(time=c(1:final.time),projection)
-
-    return(results)
-}
-
-# Generates a simple time series from an initial point, parameterization, and interpolator. Should output SIR, labor supply, consumption, and contact series.
-simple_SIR_series <- function(parms,initial_condition,interpolators,sim_time) {
-    w = parms$w
-    phi = parms$phi
-    final.time = parms$final.time
-    pi_r = parms$pi_r
-    pi_d = parms$pi_d
-    rho_c = parms$rho_c
-    rho_l = parms$rho_l
-    rho_o = parms$rho_o
-
-    S_0 = initial_condition[1]
-    I_0 = initial_condition[2]
-    R_0 = initial_condition[3]
-    D_0 = 1 - (S_0 + I_0 + R_0)
-
-    # state = c(S=S_0,I=I_0,R=R_0,benchmark_cons_contacts=impulse_init)
-    state = data.frame(S=S_0,I=I_0,R=R_0,D=D_0) #for contact() and compute_R0()
-    state_small = c(S=state[[1]],I=state[[2]],R=state[[3]]) #for interpolators
-    types = c("S","I","R")
-    labor_supply = data.frame(S=NA,I=NA,R=NA)
-    # lifetime_utility = data.frame(S=NA,I=NA,R=NA)
-
-    l_S = interpolators[["ls_fn"]]
-    l_I = interpolators[["li_fn"]]
-    l_R = interpolators[["lr_fn"]]
-
-    l_S0 = l_S(state_small)
-    l_I0 = l_I(state_small)
-    l_R0 = l_R(state_small)
-
-    choices_0 = data.frame(c_S = l_S(state_small)*w, c_I = l_I(state_small)*w*phi, l_S = l_S(state_small), l_I = l_I(state_small))
-
-    initial_contacts = contacts(parms, choices_0)
-    R0 = compute_R0(parms, choices_0, state)
-
-    output_series = matrix(-1,nrow=sim_time, ncol=14)
-    output_series[1,] = c(S_0,I_0,R_0,D_0,l_S0,l_I0,l_R0,w*l_S0,w*phi*l_I0,w*l_R0,(l_S0*S_0 + l_I0*I_0 + l_R0*R_0),(w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),initial_contacts,R0)
-
-    # output_series = matrix(rep(S_0,length.out=sim_time),
-    #                             rep(I_0,length.out=sim_time),
-    #                             rep(R_0,length.out=sim_time),
-    #                             rep(D_0,length.out=sim_time),
-    #                             rep(l_S0,length.out=sim_time),
-    #                             rep(l_I0,length.out=sim_time),
-    #                             rep(l_R0,length.out=sim_time),
-    #                             rep(w*l_S0,length.out=sim_time),
-    #                             rep(w*phi*l_I0,length.out=sim_time),
-    #                             rep(w*l_R0,length.out=sim_time),
-    #                             rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=sim_time),
-    #                             rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=sim_time),
-    #                             rep(initial_contacts,length.out=sim_time),
-    #                             rep(R0,length.out=sim_time), byrow=TRUE) 
-    output_series <- as.data.frame(output_series)
-    colnames(output_series) = c("S","I","R","D","labor_S","labor_I","labor_R","consumption_S", "consumption_I", "consumption_R", "aggregate_labor_supply", "aggregate_consumption", "contacts", "Reff")
-
-    state = SIR_update(parms, choices_0, state)
-
-    for(i in 2:sim_time) {
-        state_small = c(S=state[[1]],I=state[[2]],R=state[[3]])
-        labor_supply$S = l_S(state_small)
-        labor_supply$I = l_I(state_small)
-        labor_supply$R = l_R(state_small)
-
-        choices = data.frame(c_S = labor_supply$S*w, c_I = w*phi*labor_supply$I, l_S = labor_supply$S, l_I = labor_supply$I)
-        current_contacts = contacts(parms, choices)
-        aggregate_labor_supply = labor_supply$S*state_small[[1]] + labor_supply$I*state_small[[2]] + labor_supply$R*state_small[[3]]
-        aggregate_consumption = w*labor_supply$S*state_small[[1]] + w*phi*labor_supply$I*state_small[[2]] + w*labor_supply$R*state_small[[3]]
-
-        new_row = c(S = state$S,
-                                I = state_small[[1]],
-                                R = state_small[[2]],
-                                D = state_small[[3]],
-                                labor_S = labor_supply$S,
-                                labor_I = labor_supply$I,
-                                labor_R = labor_supply$R,
-                                consumption_S = labor_supply$S*w,
-                                consumption_I = labor_supply$I*w*phi,
-                                consumption_R = labor_supply$R*w,
-                                aggregate_labor_supply = aggregate_labor_supply,
-                                aggregate_consumption = aggregate_consumption,
-                                contacts = current_contacts,
-                                Reff = compute_R0(parms,choices,state))
-
-        output_series[i,] = new_row
-
-        state = SIR_update(parms, choices, state)
-    }
-
-    return(output_series)
-}
-
-# Generates impulse response functions
-generate_IRF <- function(SIR_init, impulse_1_list, impulse_2_list, grid_list=NULL, impulse_time, final_time) {
     
-    exog_parms_1 = impulse_1_list$exog_parms
-    series_1 = simple_SIR_series(exog_parms_1, SIR_init, impulse_1_list, (impulse_time-1))
-
-    print(head(series_1))
-
-    new_init_cond = series_1[(impulse_time-1), 1:4]
-
-    exog_parms_2 = impulse_2_list$exog_parms
-    series_2 = simple_SIR_series(exog_parms_2, SIR_init, impulse_2_list, (final_time - impulse_time + 1))
-
-    series = rbind(series_1,series_2)
-    results = cbind(time=seq(1:final_time),series)
-
-    return(results)
-}
-
-# wrapper for SIR_series. generates a time series of SIR outcomes from a dataframe of policy functions
-generate_time_series_policy <- function(solved_values, policy_list, ...) {
-    others_choices = data.frame(l_S = solved_values$labor_supply_S, l_I = solved_values$labor_supply_I, l_R = solved_values$labor_supply_R)
-
-    others_utilities = data.frame(u_S = solved_values$lifetime_utility_S, l_I = solved_values$lifetime_utility_I, l_R = solved_values$lifetime_utility_R)
+    others_utilities = data.frame(u_S = solved_values$lifetime_utility_S, u_I = solved_values$lifetime_utility_I, u_R = solved_values$lifetime_utility_R)
 
     choices_list = list(grid_list = grid_list, choices = others_choices, utilities = others_utilities)
-    projection = SIR_series_policy(exog_parms, choices_list, SIR_init, policy_list)
+
+    fallback_choices_list <- NULL
+    if(is.null(fallback_solved_values)==FALSE) {
+        # message("yeetbeets")
+        fallback_others_choices = data.frame(l_S = fallback_solved_values$labor_supply_S, l_I = fallback_solved_values$labor_supply_I, l_R = fallback_solved_values$labor_supply_R, simplex_check=simplex_check)
+        fallback_others_utilities = data.frame(u_S = fallback_solved_values$lifetime_utility_S, u_I = fallback_solved_values$lifetime_utility_I, u_R = fallback_solved_values$lifetime_utility_R)
+        fallback_choices_list <- list(grid_list = grid_list, choices = fallback_others_choices, utilities = fallback_others_utilities)
+    }
+    projection = SIR_series(exog_parms, choices_list, SIR_init, method=interpolator, grid_dfrm=grid_dfrm, infolag_list=infolag_list, fallback_choices_list=fallback_choices_list, policy_list=policy_list, grid_list=grid_list, solved_values=solved_values, fallback_solved_values=fallback_solved_values)
 
     results = cbind(time=c(1:final.time),projection)
 
     return(results)
 }
+
+# # Generates a simple time series from an initial point, parameterization, and interpolator. Should output SIR, labor supply, consumption, and contact series.
+# simple_SIR_series <- function(parms,initial_condition,interpolators,sim_time) {
+#     w = parms$w
+#     phi = parms$phi
+#     final.time = parms$final.time
+#     pi_r = parms$pi_r
+#     pi_d = parms$pi_d
+#     rho_c = parms$rho_c
+#     rho_l = parms$rho_l
+#     rho_o = parms$rho_o
+
+#     S_0 = initial_condition[1]
+#     I_0 = initial_condition[2]
+#     R_0 = initial_condition[3]
+#     D_0 = 1 - (S_0 + I_0 + R_0)
+
+#     # state = c(S=S_0,I=I_0,R=R_0,benchmark_cons_contacts=impulse_init)
+#     state = data.frame(S=S_0,I=I_0,R=R_0,D=D_0) #for contact() and compute_R0()
+#     state_small = c(S=state[[1]],I=state[[2]],R=state[[3]]) #for interpolators
+#     types = c("S","I","R")
+#     labor_supply = data.frame(S=NA,I=NA,R=NA)
+#     # lifetime_utility = data.frame(S=NA,I=NA,R=NA)
+
+#     l_S = interpolators[["ls_fn"]]
+#     l_I = interpolators[["li_fn"]]
+#     l_R = interpolators[["lr_fn"]]
+
+#     l_S0 = l_S(state_small)
+#     l_I0 = l_I(state_small)
+#     l_R0 = l_R(state_small)
+
+#     choices_0 = data.frame(c_S = l_S(state_small)*w, c_I = l_I(state_small)*w*phi, l_S = l_S(state_small), l_I = l_I(state_small))
+
+#     initial_contacts = contacts(parms, choices_0)
+#     R0 = compute_R0(parms, choices_0, state)
+
+#     output_series = matrix(-1,nrow=sim_time, ncol=14)
+#     output_series[1,] = c(S_0,I_0,R_0,D_0,l_S0,l_I0,l_R0,w*l_S0,w*phi*l_I0,w*l_R0,(l_S0*S_0 + l_I0*I_0 + l_R0*R_0),(w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),initial_contacts,R0)
+
+#     # output_series = matrix(rep(S_0,length.out=sim_time),
+#     #                             rep(I_0,length.out=sim_time),
+#     #                             rep(R_0,length.out=sim_time),
+#     #                             rep(D_0,length.out=sim_time),
+#     #                             rep(l_S0,length.out=sim_time),
+#     #                             rep(l_I0,length.out=sim_time),
+#     #                             rep(l_R0,length.out=sim_time),
+#     #                             rep(w*l_S0,length.out=sim_time),
+#     #                             rep(w*phi*l_I0,length.out=sim_time),
+#     #                             rep(w*l_R0,length.out=sim_time),
+#     #                             rep((l_S0*S_0 + l_I0*I_0 + l_R0*R_0),length.out=sim_time),
+#     #                             rep((w*l_S0*S_0 + w*phi*l_I0*I_0 + w*l_R0*R_0),length.out=sim_time),
+#     #                             rep(initial_contacts,length.out=sim_time),
+#     #                             rep(R0,length.out=sim_time), byrow=TRUE) 
+#     output_series <- as.data.frame(output_series)
+#     colnames(output_series) = c("S","I","R","D","labor_S","labor_I","labor_R","consumption_S", "consumption_I", "consumption_R", "aggregate_labor_supply", "aggregate_consumption", "contacts", "Reff")
+
+#     state = SIR_update(parms, choices_0, state)
+
+#     for(i in 2:sim_time) {
+#         state_small = c(S=state[[1]],I=state[[2]],R=state[[3]])
+#         labor_supply$S = l_S(state_small)
+#         labor_supply$I = l_I(state_small)
+#         labor_supply$R = l_R(state_small)
+
+#         choices = data.frame(c_S = labor_supply$S*w, c_I = w*phi*labor_supply$I, l_S = labor_supply$S, l_I = labor_supply$I)
+#         current_contacts = contacts(parms, choices)
+#         aggregate_labor_supply = labor_supply$S*state_small[[1]] + labor_supply$I*state_small[[2]] + labor_supply$R*state_small[[3]]
+#         aggregate_consumption = w*labor_supply$S*state_small[[1]] + w*phi*labor_supply$I*state_small[[2]] + w*labor_supply$R*state_small[[3]]
+
+#         new_row = c(S = state$S,
+#                                 I = state_small[[1]],
+#                                 R = state_small[[2]],
+#                                 D = state_small[[3]],
+#                                 labor_S = labor_supply$S,
+#                                 labor_I = labor_supply$I,
+#                                 labor_R = labor_supply$R,
+#                                 consumption_S = labor_supply$S*w,
+#                                 consumption_I = labor_supply$I*w*phi,
+#                                 consumption_R = labor_supply$R*w,
+#                                 aggregate_labor_supply = aggregate_labor_supply,
+#                                 aggregate_consumption = aggregate_consumption,
+#                                 contacts = current_contacts,
+#                                 Reff = compute_R0(parms,choices,state))
+
+#         output_series[i,] = new_row
+
+#         state = SIR_update(parms, choices, state)
+#     }
+
+#     return(output_series)
+# }
+
+# # Generates impulse response functions
+# generate_IRF <- function(SIR_init, impulse_1_list, impulse_2_list, grid_list=NULL, impulse_time, final_time) {
+    
+#     exog_parms_1 = impulse_1_list$exog_parms
+#     series_1 = simple_SIR_series(exog_parms_1, SIR_init, impulse_1_list, (impulse_time-1))
+
+#     print(head(series_1))
+
+#     new_init_cond = series_1[(impulse_time-1), 1:4]
+
+#     exog_parms_2 = impulse_2_list$exog_parms
+#     series_2 = simple_SIR_series(exog_parms_2, SIR_init, impulse_2_list, (final_time - impulse_time + 1))
+
+#     series = rbind(series_1,series_2)
+#     results = cbind(time=seq(1:final_time),series)
+
+#     return(results)
+# }
+
+# # wrapper for SIR_series. generates a time series of SIR outcomes from a dataframe of policy functions
+# generate_time_series_policy <- function(solved_values, policy_list, ...) {
+#     others_choices = data.frame(l_S = solved_values$labor_supply_S, l_I = solved_values$labor_supply_I, l_R = solved_values$labor_supply_R)
+
+#     others_utilities = data.frame(u_S = solved_values$lifetime_utility_S, l_I = solved_values$lifetime_utility_I, l_R = solved_values$lifetime_utility_R)
+
+#     choices_list = list(grid_list = grid_list, choices = others_choices, utilities = others_utilities)
+#     projection = SIR_series_policy(exog_parms, choices_list, SIR_init, policy_list)
+
+#     results = cbind(time=c(1:final.time),projection)
+
+#     return(results)
+# }
 
 
 # runs the dynamic programming solver loop
@@ -1402,12 +1854,11 @@ dp_solver <- function(...) {
 
     VFI_count = 1
 
-    l_lowerbound = 1e-6
+    l_lowerbound = 1e-9
     l_upperbound = Lbar*0.99
     l_upperbound_uniroot = Lbar*0.99
-    epsilon_VFI = 0.005*mean(as.numeric(contval_list$S))
-    if(problemtype=="planner"){epsilon_VFI = 0.0001*mean(as.numeric(contval_list$SWF))}
-    #if(problemtype=="planner"){epsilon_VFI = 0.005*mean(as.numeric(contval_list$SWF))} #only for TESTING; tolerance is too low, leaves artifacts in S-type policy functions
+    epsilon_VFI = abs(0.0075*mean(as.numeric(contval_list$S)))
+    if(problemtype=="planner"){epsilon_VFI = abs(0.0001*mean(as.numeric(contval_list$SWF)))} # Too low a tolerance leaves artifacts in the S-type policy function.
     if(hot_start==1&problemtype=="planner") {epsilon_VFI = 0.05*epsilon_VFI}
     if(precision>0) {epsilon_VFI = (0.1^precision)*epsilon_VFI}
 
@@ -1508,7 +1959,7 @@ dp_solver <- function(...) {
                         others_choices_i = data.frame(S=labor_supplies_new[1], I=labor_supplies_new[2], R=labor_supplies_new[3])
     
                         delta_consistency = max(abs(labor_supplies_new - labor_supplies_old))
-                        message("Finished consistency iteration ", iteration_consistency, ". Delta is ", round(delta_consistency,5), ", new labor supplies are (l_S, l_I, l_R) = (", round(l_S_new,3), ", ", round(l_I_new,3), ", ", round(l_R_new,3), "). \n")
+                        # message("Finished consistency iteration ", iteration_consistency, ". Delta is ", round(delta_consistency,5), ", new labor supplies are (l_S, l_I, l_R) = (", round(l_S_new,3), ", ", round(l_I_new,3), ", ", round(l_R_new,3), "). \n")
                         iteration_consistency = iteration_consistency + 1
                 #sink()
                     }
@@ -1524,6 +1975,7 @@ dp_solver <- function(...) {
     
             delta_VFI_old = delta_VFI
             delta_VFI = max(abs(new_contval_mat - old_contval_mat))
+            if( (delta_VFI_old - delta_VFI < min(1e-04,epsilon_VFI) ) & (delta_VFI_old - delta_VFI >= 0) & (VFI_count > 100) ) { delta_VFI = epsilon_VFI/2}
         }
         if(problemtype=="planner") {
             new_planval_mat = old_planval_mat
@@ -1533,14 +1985,15 @@ dp_solver <- function(...) {
             delta_VFI_old = delta_VFI
             delta_VFI = max(abs(new_planval_mat - old_planval_mat))
             if( (delta_VFI_old - delta_VFI < min(1e-04,epsilon_VFI) ) & (delta_VFI_old - delta_VFI >= 0) & (VFI_count > 100) ) { delta_VFI = epsilon_VFI/2}
+            if( VFI_count > 120 ) { delta_VFI = epsilon_VFI/2}
             #if( (VFI_count > 2) ) { delta_VFI = 1e-04}
         }
         message("Finished iteration ", VFI_count, ". Delta is ", round(delta_VFI,10) ,". Change in delta is ", (delta_VFI_old - delta_VFI) ,". Total time: ", round(VFI_count_time,3) ," seconds. Average core-time per state: ", ncores*round(VFI_count_time/nrow(grid_dfrm),3), " seconds. Average value function levels: (S,I,R) = (", round(mean(VFI_results[,4]),1),",", round(mean(VFI_results[,5]),1), ",", round(mean(VFI_results[,6]),1),"), SWF = ", round(mean(VFI_results[,7]),1),".") 
 
-        intermediate_results <- as.data.frame(VFI_results)
-        colnames(intermediate_results) <- c("labor_supply_S","labor_supply_I","labor_supply_R","lifetime_utility_S","lifetime_utility_I","lifetime_utility_R","SWF")
+        intermediate_results <- as.data.frame(cbind(grid_dfrm,VFI_results))
+        colnames(intermediate_results) <- c("S","I","R","labor_supply_S","labor_supply_I","labor_supply_R","lifetime_utility_S","lifetime_utility_I","lifetime_utility_R","SWF")
 
-        if(precision>1) {fwrite(intermediate_results, file=paste0("../../Results/value_policy_functions/value_policy_functions__",scenario_label,".csv"))}
+        if(precision>=0) {fwrite(intermediate_results, file=paste0("../../Results/value_policy_functions/value_policy_functions__",scenario_label,".csv"))}
 
         assign.time = proc.time()[3]
         message("Assigning vectors...") 
@@ -1942,4 +2395,749 @@ fig2_sketch <- function(plot_base, groupvar, summary_table) {
 
     return(list_of_plots)
 
+}
+
+### Generates rows for scenarios in sensitivity figure
+sensitivity_rows <- function(data, label) {
+
+    Mix<-c("#a6cee3","#1f78b4","#b2df8a","#33a02c","#fb9a99","#e31a1c","#fdbf6f","#ff7f00","#cab2d6","#6a3d9a","#ffff99") 
+    label <- as.character(label)
+
+    dynamics_plot_base <- ggplot(data=data, aes(x=time, group=as.character(type), color=as.character(type)))
+
+    infection <- dynamics_plot_base + 
+              geom_line(aes(y=I*100), size=1) +
+              theme_bw() + ggtitle(paste0("Infecteds under ", label)) +
+              labs(x="Day", y="Proportion of population (%)", color="Policy type") +
+              # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+              # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+              scale_color_viridis(discrete=TRUE) +
+              guides(linetype=FALSE, size=FALSE, color=FALSE)
+    infection
+
+    recession <- dynamics_plot_base + 
+              geom_line(aes(y=aggregate_consumption_deviation), size=1) +
+              theme_bw() + ggtitle(paste0("Recession under ", label)) +
+              labs(x="Day", y="GDP deviation (%)", color="Policy type") +
+              # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+              # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+              scale_color_viridis(discrete=TRUE) +
+              guides(linetype=FALSE, size=FALSE)
+    recession
+
+    big_dfrm <- data %>% 
+                    mutate(weighted_labor_S = S*labor_S) %>%
+                    mutate(weighted_labor_I = I*labor_I) %>%
+                    mutate(weighted_labor_R = R*labor_R) %>% 
+                    mutate(total_contacts = consumption_contacts + labor_contacts + other_contacts) %>%
+                    mutate(type = recode(type, eqm = "decentralized", plan = "coordinated")) %>%
+                    mutate(SI_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_I, l_S = labor_S, l_I = labor_I) )) %>%
+                    mutate(SR_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_R, l_S = labor_S, l_I = labor_R) )) %>%
+                    mutate(RI_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_I, l_S = labor_R, l_I = labor_I) )) %>%
+                    mutate(SS_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_S, l_S = labor_S, l_I = labor_S) )) %>%
+                    mutate(RR_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_R, l_S = labor_R, l_I = labor_R) )) %>%
+                    mutate(prob_contact_I = (SI_contacts + RI_contacts)/(SI_contacts + RI_contacts + SR_contacts + SS_contacts + RR_contacts)) %>%
+                    mutate(prob_contact_I_weighted = (SI_contacts*S*I + RI_contacts*R*I)/(SI_contacts*S*I + RI_contacts*R*I + SR_contacts*S*R + SS_contacts*S*S + RR_contacts*R*R)) %>%
+                    mutate(daily_new_cases_from_consumption = parms$tau*parms$rho_c*consumption_S*consumption_I*S*I) %>%
+                    mutate(daily_new_cases_from_labor = parms$tau*parms$rho_l*labor_S*labor_I*S*I) %>%
+                    mutate(daily_new_unavoidable_cases = parms$tau*parms$rho_o*S*I)
+
+all_base <- ggplot(data=big_dfrm, aes(x=time))
+
+weighted_labor_supplies = all_base +
+            geom_line(aes(y = S*labor_S, group=type, linetype=type), size=1, color = "darkgreen") +
+            geom_line(aes(y = I*labor_I, group=type, linetype=type), size=1, color = "firebrick4") +
+            geom_line(aes(y = R*labor_R, group=type, linetype=type), size=1, color = "dodgerblue4") +
+            theme_bw() + ggtitle("Aggregate labor supplies\n(green = S, red = I, blue = R)") +
+            xlab("Day") + ylab("Normalized person-hours")
+
+total_contacts = all_base + 
+            geom_line(aes(y=total_contacts, group=type, linetype=type), size=1) +
+            # geom_hline(yintercept = 12, linetype="dashed", color="darkgray") +
+            # geom_hline(yintercept = 5, linetype="dashed", color="darkgray") +
+            theme_bw() + ggtitle("Total S-I contacts") +
+            xlab("Day") + ylab("Daily contacts") + 
+            scale_colour_manual(values=Mix) + guides(color=FALSE)
+
+cases_by_site = all_base + 
+            geom_line(aes(y=daily_new_cases_from_consumption, group=type, linetype=type), size=1, color="black") +
+            geom_line(aes(y=daily_new_cases_from_labor, group=type, linetype=type), size=1, color="orange") +
+            geom_line(aes(y=daily_new_unavoidable_cases, group=type, linetype=type), size=1, color="purple") +
+            theme_bw() + ggtitle("Total cases by activity type\n(black=consumption, orange=labor, purple=other)") +
+            xlab("Day") + ylab("Cases") #+ 
+            #scale_colour_manual(values=Mix)
+
+contacts_by_site = all_base + 
+            geom_line(aes(y=consumption_contacts, group=type, linetype=type), size=1, color="black") +
+            geom_line(aes(y=labor_contacts, group=type, linetype=type), size=1, color="orange") +
+            geom_line(aes(y=other_contacts, group=type, linetype=type), size=1, color="purple") +
+            theme_bw() + ggtitle("Average contacts by activity type\n(black=consumption, orange=labor, purple=other)") +
+            xlab("Day") + ylab("Average contacts") #+ 
+            #scale_colour_manual(values=Mix)
+
+prob_contact_I_wt = all_base + 
+            geom_line(aes(y=prob_contact_I_weighted, group=type, linetype=type), size=1) +
+            theme_bw() + ggtitle("Probability random S or R contacts any I") +
+            xlab("Day") + ylab("Probability") +
+            scale_colour_manual(values=Mix) + guides(linetype=FALSE)
+
+
+    scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_") %>%
+                    mutate(total_implied_savings = aggregate_consumption_coordinated - aggregate_consumption_decentralized) %>%
+                    mutate(PV_decentralized_losses = (58000/365 - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                    mutate(PV_coordinated_losses = (58000/365 -aggregate_consumption_coordinated)*discount_factor^time) %>%
+                    mutate(PV_lockdown_losses = (58000/365 -aggregate_consumption_lockdown)*discount_factor^time) %>%
+                    mutate(PV_total_implied_savings = (aggregate_consumption_coordinated - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                    mutate(total_averted_contacts_with_Is = (prob_contact_I_weighted_decentralized - prob_contact_I_weighted_coordinated) ) %>%
+                    mutate(implied_savings_per_averted_I_contact = total_implied_savings/total_averted_contacts_with_Is)
+
+    names(scenarios_wide)
+
+    losses_and_deaths <- scenarios_wide %>% group_by(infolag) %>%
+        summarise(decentralized_losses = round(sum(PV_decentralized_losses),2),
+              decentralized_casesp100k = round(max(I_decentralized + R_decentralized + D_decentralized)*100000,0),
+              coordinated_losses = round(sum(PV_coordinated_losses),2),
+              coordinated_casesp100k = round(max(I_coordinated + R_coordinated + D_coordinated)*100000,0),
+              lockdown_losses = round(sum(PV_lockdown_losses),2),
+              lockdown_casesp100k = round(max(I_lockdown + R_lockdown + D_lockdown)*100000,0)
+              )
+
+    bar_data <- pivot_longer(losses_and_deaths, cols=c("decentralized_losses", "decentralized_casesp100k", "coordinated_losses", "coordinated_casesp100k", "lockdown_losses", "lockdown_casesp100k"), names_to = c("type","measure"), names_sep="_", values_to = "values")
+
+    print(bar_data, nrow=100)
+
+    bar_summary <- ggplot(bar_data, aes(fill=type, x=reorder(type, -values), y=values)) +
+        geom_bar(position="dodge", stat="identity") +
+        ggtitle(label) + 
+        # facet_wrap(~'measure + infolag', scales = "free_y", labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+        facet_wrap(~measure, labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+       geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+        #scale_fill_manual(values=Mix) +
+        ylab(NULL) + xlab("") + labs(fill = "Policy type") +
+        theme_classic() +
+        theme(strip.background = element_blank(),
+             strip.placement = "outside") +
+        guides(fill=FALSE)
+
+    output_list <- list(summary=bar_summary, infection=infection, recession=recession, weighted_labor_supplies=weighted_labor_supplies, cases_by_site=cases_by_site, contacts_by_site=contacts_by_site, prob_contact_I_wt=prob_contact_I_wt, total_contacts=total_contacts)
+
+    return(output_list)
+}
+
+### Dynamics figures for information frictions cases
+generate_dynamics_figures <- function(big_eqm_dfrm, big_opt_dfrm, label) {
+
+      label <- as.character(label)
+
+      eqm_plot_base <- ggplot(data=big_eqm_dfrm, aes(x=time, group=as.character(infolag), color=as.character(infolag)))
+      opt_plot_base <- ggplot(data=big_opt_dfrm, aes(x=time, group=as.character(infolag), color=as.character(infolag)))
+
+      infection_lower <- min(c(big_eqm_dfrm$I,big_opt_dfrm$I))*100
+      infection_upper <- max(c(big_eqm_dfrm$I,big_opt_dfrm$I))*100
+
+      supplies_lower <- min(c(big_eqm_dfrm$labor_S, big_eqm_dfrm$labor_I, big_eqm_dfrm$labor_R, big_opt_dfrm$labor_S, big_opt_dfrm$labor_I, big_opt_dfrm$labor_R))
+      supplies_upper <- max(c(big_eqm_dfrm$labor_S, big_eqm_dfrm$labor_I, big_eqm_dfrm$labor_R, big_opt_dfrm$labor_S, big_opt_dfrm$labor_I, big_opt_dfrm$labor_R))
+
+      eqm_infection <- eqm_plot_base + 
+                  geom_line(aes(y=I*100), size=1) +
+                  theme_bw() + ggtitle("Eqm: Infecteds") +
+                  labs(x="Day", y="Proportion of population (%)", color=label) +
+                  ylim(c(0,infection_upper)) + 
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE)
+      eqm_infection
+
+      eqm_labor_supplies <- eqm_plot_base + 
+                  geom_line(aes(y=labor_S), size=1) +
+                  geom_line(aes(y=labor_I), size=1.5, linetype = "dashed") +
+                  ylim(c(supplies_lower,supplies_upper)) + 
+                  theme_bw() + ggtitle("Eqm: S (solid) & I (dashed) labor supplies") +
+                  labs(x="Day", y="Hours worked", color=label) +
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE)
+      eqm_labor_supplies
+
+      opt_infection <- opt_plot_base + 
+                  geom_line(aes(y=I*100), size=1) +
+                  theme_bw() + ggtitle("Plan: Infecteds") +
+                  labs(x="Day", y="Proportion of population (%)", color=label) +
+                  ylim(c(0,infection_upper)) + 
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE)
+      opt_infection
+
+      opt_labor_supplies <- opt_plot_base + 
+                  geom_line(aes(y=labor_S), size=1) +
+                  geom_line(aes(y=labor_I), size=1.5, linetype = "dashed") +
+                  ylim(c(supplies_lower,supplies_upper)) + 
+                  theme_bw() + ggtitle("Plan: S (solid) & I (dashed) labor supplies") +
+                  labs(x="Day", y="Hours worked", color=label) +
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE)
+      opt_labor_supplies
+
+      lag_dynamics <- (eqm_infection / eqm_labor_supplies) | (opt_infection / opt_labor_supplies)
+
+      return(lag_dynamics)
+}
+
+### Dynamics figures for information frictions cases -- single scenario
+generate_dynamics_figures_small <- function(dfrm, label) {
+
+      label <- as.character(label)
+
+      plot_base <- ggplot(data=dfrm, aes(x=time, group=as.character(infolag), color=as.character(infolag)))
+
+      infection <- plot_base + 
+                  geom_line(aes(y=I*100), size=1) +
+                  theme_bw() + ggtitle("Eqm: Infecteds") +
+                  labs(x="Day", y="Proportion of population (%)", color=label) +
+                  # ylim(c(0,infection_upper)) + 
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE, group=FALSE, color=FALSE)
+      infection
+
+      labor_supplies <- plot_base + 
+                  geom_line(aes(y=labor_S), size=1) +
+                  geom_line(aes(y=labor_I), size=1.5, linetype = "dashed") +
+                  # ylim(c(supplies_lower,supplies_upper)) + 
+                  theme_bw() + ggtitle("Eqm: S (solid) & I (dashed) labor supplies") +
+                  labs(x="Day", y="Hours worked", color=label) +
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE, group=FALSE, color=FALSE)
+      labor_supplies
+
+      recession <- plot_base + 
+                  geom_line(aes(y=aggregate_consumption_deviation), size=1) +
+                  # ylim(c(supplies_lower,supplies_upper)) + 
+                  theme_bw() + ggtitle("Recession") +
+                  labs(x="Day", y="% deviation from initial level", color=label) +
+                  # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                  # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                  scale_color_viridis(discrete=TRUE) +
+                  guides(linetype=FALSE, size=FALSE, group=FALSE, color=FALSE)
+      recession
+
+      plotlist <- list(infection = infection, recession = recession, labor_supplies = labor_supplies)
+
+      return(plotlist)
+}
+
+### Dynamics figures for information frictions cases -- combine three scenarios into a single panel
+generate_dynamics_figures_small_composite <- function(dfrm, label, end_time=250, type="default") {
+
+      label <- as.character(label)
+
+      dfrm <- dfrm %>% filter(time <= end_time)
+
+      write.csv(dfrm, file=paste0(label,"_dynamics.csv"))
+
+      if(type=="default"){
+            dfrm$type <- recode(dfrm$type, eqm = "\nVoluntary\nisolation\n", plan = "\nTargeted\nisolation\n", lockdown = "Lockdown")
+            cols <- c("\nTargeted\nisolation\n" = viridis(3)[3], "\nVoluntary\nisolation\n" = viridis(3)[1],  "\nLockdown\n" = viridis(3)[2])
+      }
+
+      if(type=="eqm_plan"){
+            dfrm$type <- recode(dfrm$type, eqm = "\nVoluntary\nisolation\n", plan = "\nTargeted\nisolation\n", lockdown_mech = "ld.casemin", lockdown_beh = "ld.decen", nocontrol = "\nNo control\n")
+            cols <- c("\nTargeted\nisolation\n" = viridis(3)[3], "\nVoluntary\nisolation\n" = viridis(3)[1],  "\nNo control\n" = viridis(3)[2])
+      }
+
+      if(type=="case_penalty"){
+            dfrm$type <- recode(dfrm$type, 
+                                no.control = "\nNo control\n", 
+                                penalty.0 = "\nTargeted\nisolation\n",
+                                penalty.1000 = "\nTargeted\nisolation\nw/ case penalty\n")
+            cols <- c("\nTargeted\nisolation\n" = viridis(3)[3], "\nTargeted\nisolation\nw/ case penalty\n" = viridis(3)[1],  "\nNo control\n" = viridis(3)[2])
+      }
+
+      plot_base <- ggplot(data=dfrm, aes(x=time, group=as.character(type), color=as.character(type)))
+
+      infection <- plot_base + 
+                    geom_line(aes(y=I*100), size=1) +
+                    # geom_jitter(aes(y=I*100), size=1.2, width=1.2) +
+                    theme_bw() + ggtitle(paste0("Infecteds ",label)) +
+                    labs(x="Day", y="% currently\ninfected", color="Control type") +
+                    ylim(c(0,max(dfrm$I)*100)) + 
+                    # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                    # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                    scale_color_viridis(discrete=TRUE) +
+                    theme(text = element_text(size=24)) +
+                    guides(linetype=FALSE, size=FALSE, group=FALSE, color=FALSE)
+      infection
+
+      recession <- plot_base + 
+                    geom_line(aes(y=aggregate_consumption_deviation), size=1) +
+                    ylim(c(-100,0)) + 
+                    theme_bw() + ggtitle(paste0("Recession ",label)) +
+                    labs(x="Day", y="% deviation", color="Control type") +
+                    # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                    # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                    scale_color_viridis(discrete=TRUE) +
+                    theme(text = element_text(size=24)) +
+                    guides(linetype=FALSE, size=FALSE, group=FALSE, color=FALSE)
+      recession
+
+      reff <- plot_base + 
+                    geom_line(aes(y=Reff), size=1) +
+                    theme_bw() + ggtitle(paste0("Reproductive number ",label)) +
+                    labs(x="Day", y="R_eff", color="Control type") +
+                    # geom_vline(xintercept = as.numeric(best_params["start_date",]), linetype="dashed") + 
+                    # geom_vline(xintercept = as.numeric(best_params["end_date",]), linetype="dashed") + 
+                    scale_color_viridis(discrete=TRUE) +
+                    theme(text = element_text(size=24)) +
+                    guides(linetype=FALSE, size=FALSE, group=FALSE)
+      reff
+
+
+    if(length(unique(dfrm$type))==3){ 
+        infection <- infection + scale_color_manual(values=cols)  
+        recession <- recession + scale_color_manual(values=cols)  
+        reff <- reff + scale_color_manual(values=cols)  
+    }
+
+      plotlist <- list(infection = infection, recession = recession, reff = reff)
+
+      return(plotlist)
+}
+
+# Function to generate recession metrics for information frictions scenarios
+generate_recession_metrics <- function(big_eqm_dfrm, big_opt_dfrm, labels) {
+
+      label <- as.character(labels[1])
+
+      case1_label <- as.character(labels[2])
+      case2_label <- as.character(labels[3])
+      case3_label <- as.character(labels[4])
+
+      big_dfrm <- rbind(big_eqm_dfrm, big_opt_dfrm)
+
+      big_dfrm <- big_dfrm %>% 
+                        mutate(weighted_labor_S = S*labor_S) %>%
+                        mutate(weighted_labor_I = I*labor_I) %>%
+                        mutate(weighted_labor_R = R*labor_R) %>% 
+                        mutate(total_contacts = consumption_contacts + labor_contacts + other_contacts) %>%
+                        mutate(type = recode(type, eqm = "decentralized", plan = "coordinated")) %>%
+                        mutate(SI_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_I, l_S = labor_S, l_I = labor_I) )) %>%
+                        mutate(SR_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_R, l_S = labor_S, l_I = labor_R) )) %>%
+                        mutate(RI_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_I, l_S = labor_R, l_I = labor_I) )) %>%
+                        mutate(SS_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_S, l_S = labor_S, l_I = labor_S) )) %>%
+                        mutate(RR_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_R, l_S = labor_R, l_I = labor_R) )) %>%
+                        mutate(prob_contact_I = (SI_contacts + RI_contacts)/(SI_contacts + RI_contacts + SR_contacts + SS_contacts + RR_contacts)) %>%
+                        mutate(prob_contact_I_weighted = (SI_contacts*S*I + RI_contacts*R*I)/(SI_contacts*S*I + RI_contacts*R*I + SR_contacts*S*R + SS_contacts*S*S + RR_contacts*R*R)) %>%
+                        mutate(daily_new_cases_from_consumption = parms$tau*parms$rho_c*consumption_S*consumption_I*S*I) %>%
+                        mutate(daily_new_cases_from_labor = parms$tau*parms$rho_l*labor_S*labor_I*S*I) %>%
+                        mutate(daily_new_unavoidable_cases = parms$tau*parms$rho_o*S*I)
+
+      scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_") %>%
+                        mutate(total_implied_savings = aggregate_consumption_coordinated - aggregate_consumption_decentralized) %>%
+                        mutate(PV_decentralized_losses = (58000/365 - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                        mutate(PV_coordinated_losses = (58000/365 -aggregate_consumption_coordinated)*discount_factor^time) %>%
+                        # mutate(PV_blanket_1_losses = (58000/365 -aggregate_consumption_blanket_1)*discount_factor^time) %>%
+                        mutate(PV_total_implied_savings = (aggregate_consumption_coordinated - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                        mutate(total_averted_contacts_with_Is = (prob_contact_I_weighted_decentralized - prob_contact_I_weighted_coordinated) ) %>%
+                        mutate(implied_savings_per_averted_I_contact = total_implied_savings/total_averted_contacts_with_Is)
+
+      names(scenarios_wide)
+
+      #big_dfrm = big_dfrm %>% filter(type != "blanket_1")
+
+      losses_and_deaths <- scenarios_wide %>% group_by(infolag) %>%
+            summarise(decentralized_losses = round(sum(PV_decentralized_losses),2),
+                  decentralized_casesp100k = round(max(I_decentralized + R_decentralized + D_decentralized)*100000,0),
+                  coordinated_losses = round(sum(PV_coordinated_losses),2),
+                  coordinated_casesp100k = round(max(I_coordinated + R_coordinated + D_coordinated)*100000,0)
+                  )
+
+      bar_data <- pivot_longer(losses_and_deaths, cols=c("decentralized_losses", "decentralized_casesp100k", "coordinated_losses", "coordinated_casesp100k"), names_to = c("type","measure"), names_sep="_", values_to = "values")
+
+      print(bar_data, nrow=100)
+
+      bar_summary_nolag <- ggplot((bar_data %>% filter(infolag==unique(infolag)[1])), aes(fill=type, x=reorder(type, -values), y=values)) +
+            geom_bar(position="dodge", stat="identity") +
+            ggtitle(case1_label) + 
+            # facet_wrap(~'measure + infolag', scales = "free_y", labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+            facet_wrap(~measure, labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+            #scale_fill_manual(values=Mix) +
+            ylab(NULL) + xlab("") + labs(fill = "Policy type") +
+            theme_classic() +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside") +
+            guides(fill=FALSE)
+
+
+      bar_summary_lag1 <- ggplot((bar_data %>% filter(infolag==unique(infolag)[2])), aes(fill=type, x=reorder(type, -values), y=values)) +
+            geom_bar(position="dodge", stat="identity") +
+            ggtitle(case2_label) + 
+            # facet_wrap(~'measure + infolag', scales = "free_y", labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+            facet_wrap(~measure, labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+            #scale_fill_manual(values=Mix) +
+            ylab(NULL) + xlab("") + labs(fill = "Policy type") +
+            theme_classic() +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside") +
+            guides(fill=FALSE)
+
+
+      bar_summary_lag2 <- ggplot((bar_data %>% filter(infolag==unique(infolag)[3])), aes(fill=type, x=reorder(type, -values), y=values)) +
+            geom_bar(position="dodge", stat="identity") +
+            ggtitle(case3_label) + 
+            # facet_wrap(~'measure + infolag', scales = "free_y", labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+            facet_wrap(~measure, labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+            #scale_fill_manual(values=Mix) +
+            ylab(NULL) + xlab("") + labs(fill = "Policy type") +
+            theme_classic() +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside")
+
+      recovery_threshold = 1.5 # The "recovery threshold" is the maximum deviation from the initial steady state allowed before declaring "the economy has recovered". A threshold of 1 means "the economy has recovered when the output gap relative to the initial steady state is less than 1%"
+
+      dollar_format(prefix="$",suffix="", big.mark=",", largest_with_cents = 100)
+
+      scenario_summaries = big_dfrm %>% 
+                        group_by(infolag,type) %>%
+                        summarise(time_to_suppression = time[min(which(Reff<1))] ,
+                              time_to_peak = time[which.max(I)] ,
+                              infection_peak = max(I)*100000,
+                              total_deaths = max(D)*total_population,
+                              recession_peak = -min(aggregate_consumption_deviation),
+                              time_to_recovery = time[(recovery_threshold + aggregate_consumption_deviation > 0)][which(time>time_to_peak)][1])#,
+                              # total_losses = total_population*sum( (58000/365 - aggregate_consumption)*discount_factor^time) )
+      scenario_summaries[-c(1,2)] = round(scenario_summaries[,-c(1,2)],2)
+      summary_stats = as.data.frame(t(scenario_summaries)) %>% row_to_names(row_number=2, remove_rows_above=FALSE)
+      summary_stats
+
+      indx <- sapply(summary_stats, is.factor)
+      summary_stats[indx] <- lapply(summary_stats[indx], function(x) as.numeric(as.character(x)))
+
+      summary_stats["infolag",] = paste0(summary_stats["infolag",])
+      summary_stats["time_to_suppression",] = paste0(summary_stats["time_to_suppression",]," days")
+      summary_stats["time_to_peak",] = paste0(summary_stats["time_to_peak",]," days")
+      summary_stats["time_to_recovery",] = paste0(summary_stats["time_to_recovery",]," days")
+      summary_stats["infection_peak",] = paste0(summary_stats["infection_peak",]," cases per 100,000")
+      summary_stats["recession_peak",] = paste0(summary_stats["recession_peak",],"% contraction")
+      # summary_stats["total_losses",] = paste0(dollar(round(as.numeric(summary_stats["total_losses",]),0)))
+      summary_stats
+
+      ##### Generate table
+
+      #summary_table <- ggtexttable(summary_stats, rows = c("Time to peak", "Time to suppression", "Peak infection", "Recession trough", "Time to recovery", "Average per capita loss"), theme = ttheme(colnames.style=colnames_style(size=18)))
+      summary_table <- ggtexttable(summary_stats, rows = c(label,"Time to suppression", "Time to peak", "Peak infection", "Total deaths", "Recession trough", "Time to recovery"), theme = ttheme(colnames.style=colnames_style(size=18)))
+      summary_table
+
+      lag_summaries <- (bar_summary_nolag | bar_summary_lag1 | bar_summary_lag2) / summary_table
+      return(lag_summaries)
+
+}
+
+# Function to generate just the recession metrics
+generate_just_metrics <- function(dfrm, type="eqm_plan") {
+
+    big_dfrm <- dfrm %>% 
+                    mutate(weighted_labor_S = S*labor_S) %>%
+                    mutate(weighted_labor_I = I*labor_I) %>%
+                    mutate(weighted_labor_R = R*labor_R) %>% 
+                    mutate(total_contacts = consumption_contacts + labor_contacts + other_contacts) %>%
+                    mutate(type = recode(type, eqm = "decentralized", lockdown = "lockdown", plan = "coordinated")) %>%
+                    mutate(SI_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_I, l_S = labor_S, l_I = labor_I) )) %>%
+                    mutate(SR_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_R, l_S = labor_S, l_I = labor_R) )) %>%
+                    mutate(RI_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_I, l_S = labor_R, l_I = labor_I) )) %>%
+                    mutate(SS_contacts = contacts(parms, choices = data.frame(c_S = consumption_S, c_I = consumption_S, l_S = labor_S, l_I = labor_S) )) %>%
+                    mutate(RR_contacts = contacts(parms, choices = data.frame(c_S = consumption_R, c_I = consumption_R, l_S = labor_R, l_I = labor_R) )) %>%
+                    mutate(prob_contact_I = (SI_contacts + RI_contacts)/(SI_contacts + RI_contacts + SR_contacts + SS_contacts + RR_contacts)) %>%
+                    mutate(prob_contact_I_weighted = (SI_contacts*S*I + RI_contacts*R*I)/(SI_contacts*S*I + RI_contacts*R*I + SR_contacts*S*R + SS_contacts*S*S + RR_contacts*R*R)) %>%
+                    mutate(daily_new_cases_from_consumption = parms$tau*parms$rho_c*consumption_S*consumption_I*S*I) %>%
+                    mutate(daily_new_cases_from_labor = parms$tau*parms$rho_l*labor_S*labor_I*S*I) %>%
+                    mutate(daily_new_unavoidable_cases = parms$tau*parms$rho_o*S*I)
+
+                    # print(head(big_dfrm))
+
+    if(length(unique(big_dfrm$type))==3&type=="eqm_plan") {
+        scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_") %>%
+                        mutate(total_implied_savings = aggregate_consumption_coordinated - aggregate_consumption_decentralized) %>%
+                        mutate(PV_decentralized_losses = (58000/365 - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                        mutate(PV_lockdown_losses = (58000/365 - aggregate_consumption_lockdown)*discount_factor^time) %>%
+                        mutate(PV_coordinated_losses = (58000/365 -aggregate_consumption_coordinated)*discount_factor^time) %>%
+                        # mutate(PV_blanket_1_losses = (58000/365 -aggregate_consumption_blanket_1)*discount_factor^time) %>%
+                        mutate(PV_total_implied_savings = (aggregate_consumption_coordinated - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                        mutate(total_averted_contacts_with_Is = (prob_contact_I_weighted_decentralized - prob_contact_I_weighted_coordinated) ) %>%
+                        mutate(implied_savings_per_averted_I_contact = total_implied_savings/total_averted_contacts_with_Is)
+
+        losses_and_deaths <- scenarios_wide %>% group_by(infolag) %>%
+            summarise(decentralized_losses = round(sum(PV_decentralized_losses, na.rm=TRUE),0),
+                  decentralized_casesp100k = round(max(I_decentralized + R_decentralized + D_decentralized)*100000,0),
+                  lockdown_losses = round(sum(PV_lockdown_losses, na.rm=TRUE),0),
+                  lockdown_casesp100k = round(max(I_lockdown + R_lockdown + D_lockdown)*100000,0),
+                  coordinated_losses = round(sum(PV_coordinated_losses, na.rm=TRUE),0),
+                  coordinated_casesp100k = round(max(I_coordinated + R_coordinated + D_coordinated)*100000,0)
+                  )
+
+            # print(losses_and_deaths)
+
+        bar_data <- pivot_longer(losses_and_deaths, cols=c("decentralized_losses", "decentralized_casesp100k", "lockdown_losses", "lockdown_casesp100k", "coordinated_losses", "coordinated_casesp100k"), names_to = c("type","measure"), names_sep="_", values_to = "values")
+    }
+
+    if(length(unique(big_dfrm$type))==5&type=="eqm_plan") {
+        scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_") %>%
+                        mutate(PV_decentralized_losses = (58000/365 - aggregate_consumption_decentralized)*discount_factor^time) %>%
+                        mutate(PV_gesir_losses = (58000/365 - aggregate_consumption_nocontrol)*discount_factor^time) %>%
+                        mutate(PV_lockdown_coupl_losses = (58000/365 - aggregate_consumption_lockdown_beh)*discount_factor^time) %>%
+                        mutate(PV_lockdown_gesir_losses = (58000/365 - aggregate_consumption_lockdown_mech)*discount_factor^time) %>%
+                        mutate(PV_coordinated_losses = (58000/365 -aggregate_consumption_coordinated)*discount_factor^time)
+
+        losses_and_deaths <- scenarios_wide %>% group_by(infolag) %>%
+            summarise(decentralized_losses = round(sum(PV_decentralized_losses, na.rm=TRUE),0),
+                  decentralized_casesp100k = round(max(I_decentralized + R_decentralized + D_decentralized)*100000,0),
+                  gesir_losses = round(sum(PV_gesir_losses, na.rm=TRUE),0),
+                  gesir_casesp100k = round(max(I_nocontrol + R_nocontrol + D_nocontrol)*100000,0),
+                  ld.decen_losses = round(sum(PV_lockdown_coupl_losses, na.rm=TRUE),0),
+                  ld.decen_casesp100k = round(max(I_lockdown_beh + R_lockdown_beh + D_lockdown_beh)*100000,0),
+                  lockdown.gesir_losses = round(sum(PV_lockdown_gesir_losses, na.rm=TRUE),0),
+                  lockdown.gesir_casesp100k = round(max(I_lockdown_mech + R_lockdown_mech + D_lockdown_mech)*100000,0),
+                  coordinated_losses = round(sum(PV_coordinated_losses, na.rm=TRUE),0),
+                  coordinated_casesp100k = round(max(I_coordinated + R_coordinated + D_coordinated)*100000,0)
+                  )
+
+            # print(losses_and_deaths)
+
+        bar_data <- pivot_longer(losses_and_deaths, cols=c("decentralized_losses", "decentralized_casesp100k", "gesir_losses", "gesir_casesp100k", "lockdown.decen_losses", "lockdown.decen_casesp100k", "lockdown.gesir_losses", "lockdown.gesir_casesp100k", "coordinated_losses", "coordinated_casesp100k"), names_to = c("type","measure"), names_sep="_", values_to = "values")
+    }
+
+
+        if(type=="flexible") {
+        scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_")
+
+        print(colnames(scenarios_wide))
+
+            for(i in seq_along(unique(big_dfrm[,"type"]))) {
+                core_name <- unique(big_dfrm[,"type"])[i]
+                new_colname <- paste0("PV_",core_name,"_losses")
+                cons_colname <- paste0("aggregate_consumption_",core_name)
+                print(cons_colname)
+                scenarios_wide <- scenarios_wide %>% mutate(!!new_colname := (58000/365 - !!rlang::sym(cons_colname))*discount_factor^time)
+            }
+
+
+            temp <- list() 
+
+            for(i in seq_along(unique(big_dfrm[,"type"]))) {
+                core_name <- unique(big_dfrm[,"type"])[i]
+                loss_colname <- paste0(core_name,"_losses")
+                case_colname <- paste0(core_name,"_casesp100k")
+
+                loss_colname_input <- paste0("PV_",core_name,"_losses")
+
+                I_name <- paste0("I_",core_name)
+                R_name <- paste0("R_",core_name)
+                D_name <- paste0("D_",core_name)
+
+                temp_wide <- scenarios_wide %>% group_by(infolag) %>% 
+                    summarise(!!loss_colname := round(sum( !!rlang::sym(loss_colname_input), na.rm=TRUE )),
+                                !!case_colname := round(max(!!rlang::sym(D_name) + !!rlang::sym(I_name) + !!rlang::sym(R_name))*100000 ,0 ) )
+
+                temp[[i]] <- pivot_longer(temp_wide, cols=c(
+                    !!rlang::sym(loss_colname), !!rlang::sym(case_colname), 
+                    ), names_to = c("type","measure"), names_sep="_", values_to = "values")
+            }
+
+            losses_and_deaths <- rbindlist(temp)
+
+            bar_data <- losses_and_deaths
+        }
+
+        if(type=="eqm_plan2") {
+        scenarios_wide <- pivot_wider(big_dfrm[,c("time","type","aggregate_consumption","prob_contact_I_weighted","I","R","D","infolag")], id_cols=c("time","type","infolag"), names_from=type, values_from=c(aggregate_consumption, prob_contact_I_weighted, I, R, D), names_sep="_") %>%
+                        mutate(PV_no.control_losses = (58000/365 - aggregate_consumption_no.control)*discount_factor^time) %>%
+                        mutate(PV_voluntary.isolation_losses = (58000/365 - aggregate_consumption_voluntary.isolation)*discount_factor^time) %>%
+                        mutate(PV_lockdown_losses = (58000/365 - aggregate_consumption_lockdown)*discount_factor^time) %>%
+                        mutate(PV_casemin_losses = (58000/365 - aggregate_consumption_ld.casemin)*discount_factor^time) %>%
+                        mutate(PV_targeted.no.casecost_losses = (58000/365 - aggregate_consumption_targeted.no.casecost)*discount_factor^time) %>%
+                        mutate(PV_targeted.with.casecost_losses = (58000/365 - aggregate_consumption_targeted.with.casecost)*discount_factor^time)
+
+        losses_and_deaths <- scenarios_wide %>% group_by(infolag) %>%
+            summarise(
+                no.control_losses = round(sum(PV_no.control_losses, na.rm=TRUE),0),
+                  no.control_casesp100k = round(max(I_no.control + R_no.control + D_no.control)*100000,0),
+                  voluntary.isolation_losses = round(sum(PV_voluntary.isolation_losses, na.rm=TRUE),0),
+                  voluntary.isolation_casesp100k = round(max(I_voluntary.isolation + R_voluntary.isolation + D_voluntary.isolation)*100000,0),
+                  lockdown_losses = round(sum(PV_lockdown_losses, na.rm=TRUE),0),
+                  lockdown_casesp100k = round(max(I_lockdown + R_lockdown + D_lockdown)*100000,0),
+                  casemin_losses = round(sum(PV_casemin_losses, na.rm=TRUE),0),
+                  casemin_casesp100k = round(max(I_ld.casemin + R_ld.casemin + D_ld.casemin)*100000,0),
+                  targeted.no.casecost_losses = round(sum(PV_targeted.no.casecost_losses, na.rm=TRUE),0),
+                  targeted.no.casecost_casesp100k = round(max(I_targeted.no.casecost + R_targeted.no.casecost + D_targeted.no.casecost)*100000,0),
+                  targeted.with.casecost_losses = round(sum(PV_targeted.with.casecost_losses, na.rm=TRUE),0),
+                  targeted.with.casecost_casesp100k = round(max(I_targeted.with.casecost + R_targeted.with.casecost + D_targeted.with.casecost)*100000,0)
+                  )
+
+            # print(losses_and_deaths)
+
+        bar_data <- pivot_longer(losses_and_deaths, cols=c(
+            "no.control_losses", "no.control_casesp100k", 
+            "voluntary.isolation_losses", "voluntary.isolation_casesp100k", 
+            "lockdown_losses", "lockdown_casesp100k", 
+            "casemin_losses", "casemin_casesp100k", 
+            "targeted.no.casecost_losses", "targeted.no.casecost_casesp100k", 
+            "targeted.with.casecost_losses", "targeted.with.casecost_casesp100k"
+            ), names_to = c("type","measure"), names_sep="_", values_to = "values")
+    }
+
+    return(bar_data)
+
+}
+
+# Function to calculate ratio of decentralized to centralized
+calculate_ratio <- function(metrics, metric_type) {
+    eqm <- metrics %>% filter(type=="decentralized" & measure==metric_type) %>% select(values) %>% as.numeric()
+
+    plan <- metrics %>% filter(type=="coordinated" & measure==metric_type) %>% select(values) %>% as.numeric()
+
+    ratio <- 1 - plan/eqm
+
+    return(ratio)
+}
+
+# Function to compare ratios
+compare_ratios <- function(list_of_metrics, metric_type) {
+    metrics_vec <- rep(NA,length.out=length(list_of_metrics))
+    for(i in seq_along(list_of_metrics)) {
+        metrics_vec[i] <- calculate_ratio(list_of_metrics[[i]], metric_type)
+    }
+
+    return(metrics_vec)
+}
+
+
+# Function to generate recession metrics figures for information frictions scenarios
+generate_recession_metrics_small_composite <- function(dfrm, label, plot_type="eqm_plan", end_time=250) {
+
+      label <- as.character(label)
+
+      dfrm <- dfrm %>% filter(time <= end_time)
+
+    if(plot_type=="case_penalty"){
+        dfrm$type <- recode(dfrm$type, 
+                            no.control = "\nNo control\n", 
+                            penalty.0 = "\nTargeted\nisolation\n",
+                            penalty.1000 = "\nTargeted\nisolation\nw/ case penalty")
+        cols <- c("\nTargeted\nisolation\n" = viridis(3)[3], "\nTargeted\nisolation\nw/ case penalty" = viridis(3)[1],  "\nNo control\n" = viridis(3)[2])
+    }
+
+      bar_data <- generate_just_metrics(dfrm, type="flexible")
+
+      write.csv(bar_data, file=paste0(label,"_summary_stats.csv"))
+
+    if(length(unique(bar_data$type))==3&plot_type!="case_penalty"){
+        bar_data$type <- recode(bar_data$type, decentralized = "\nVoluntary\nisolation\n", coordinated = "\nTargeted\nisolation\n", nocontrol = "\nNo control\n")
+        cols <- c("\nTargeted\nisolation\n" = viridis(3)[3], "\nVoluntary\nisolation\n" = viridis(3)[1], "\nNo control\n" = viridis(3)[2])
+    }
+
+      bar_summary <- ggplot((bar_data %>% filter(infolag==unique(infolag)[1])), aes(fill=type, x=reorder(type, -values), y=values)) +
+            geom_bar(position="dodge", stat="identity") +
+            facet_wrap(~measure, labeller = as_labeller(c(casesp100k = "Total cases per 100,000",losses="Individual loss ($/person)")), strip.position = "left") +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+            ylab(NULL) + xlab("") + labs(fill = "Policy type") +
+            theme_classic() +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside",
+                 text = element_text(size=24)) + 
+            scale_color_viridis() +
+            guides(fill=FALSE, color=FALSE)
+
+
+    if(length(unique(dfrm$type))==3){ bar_summary <- bar_summary + scale_color_manual(values=cols) }
+
+        biggest_loss <- max((bar_data %>% filter(infolag==unique(infolag)[1] & measure=="losses"))$values)
+
+      bar_summary_losses <- ggplot((bar_data %>% filter(infolag==unique(infolag)[1] & measure=="losses")), aes(fill=type, x=reorder(type, -values), y=values)) +
+            geom_bar(position="dodge", stat="identity") +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-0.25) +
+            ylab(NULL) + xlab("") + labs(fill = "Control type", title = "Average loss per person ($)") +
+            theme_classic() +
+            ylim(c(0,(biggest_loss + 500))) +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside",
+                 text = element_text(size=24)) +
+            scale_color_viridis() +
+            guides(fill=FALSE, color=FALSE)
+
+
+    if(length(unique(dfrm$type))==3){ bar_summary_losses <- bar_summary_losses + scale_fill_manual(values=cols)  }
+
+        smallest_cases <- min((bar_data %>% filter(infolag==unique(infolag)[1] & measure=="casesp100k"))$values)
+        biggest_cases <- max((bar_data %>% filter(infolag==unique(infolag)[1] & measure=="casesp100k"))$values)
+
+      bar_summary_cases <- ggplot((bar_data %>% filter(infolag==unique(infolag)[1] & measure=="casesp100k")), aes(fill=type, x=reorder(type, -values), y=values)) +
+            # geom_bar(position="dodge", stat="identity") +
+            geom_point(aes(color=type), size=10) +
+           geom_text(aes(label=round(values,3)), position=position_dodge(width=0.9), vjust=-1.5) +
+            ylab(NULL) + xlab("") + labs(fill = "Control type", color = "Control type", title = "Total cases/100,000") +
+            theme_classic() +
+            ylim(c( (smallest_cases - 500) , (biggest_cases + 10000) )) +
+            theme(strip.background = element_blank(),
+                 strip.placement = "outside",
+                 text = element_text(size=24)) +
+            guides(fill=FALSE, color=FALSE)
+
+    if(length(unique(dfrm$type))==3){ bar_summary_cases <- bar_summary_cases + scale_color_manual(values=cols)  }
+
+      lag_summaries <- list(overall=bar_summary, losses=bar_summary_losses, cases=bar_summary_cases)
+      return(lag_summaries)
+}
+
+##### CODE TO READ IN ALL CSV FILES IN THE SPECIFIED WORKING DIRECTORY
+read_vpfn_csvs <- function(plot_dir) {
+  directory <- paste0("../../Results/",plot_dir)
+  setwd(directory)
+
+  vpf_filenames = list.files(pattern="*.csv")
+
+  value_policy_function_list = list()
+  for(name in seq_along(vpf_filenames)) {
+    
+    #creates label to be put into stacked set of value functions
+    label = gsub(".csv", "", vpf_filenames[name])
+    label = gsub("value_policy_functions__", "", label)
+    
+    #creates set of variables to determine what each value function corresponds to -- will later be used to extract parts to create eventual value function
+    vpfn = grepl("vpfn",label,fixed=TRUE)
+    
+    eqm = grepl("eqm",label,fixed=TRUE)
+    planner = grepl("planner",label,fixed=TRUE)
+    # First pass: grab all the descriptors in full
+    elasticity <- str_match(label, "elasticity_[-\\d]+(?:\\.\\d+)?")
+    gdppc <- str_match(label, "gdppc_[-\\d]+(?:\\.\\d+)?")
+    laborsupply <- str_match(label, "labor_[-\\d]+(?:\\.\\d+)?")
+    cfr <- str_match(label, "cfr_[-\\d]+(?:\\.\\d+)?")
+    R0 <- str_match(label, "R0_[-\\d]+(?:\\.\\d+)?")
+    # Second pass: strip down to just numbers
+    elasticity <- gsub("elasticity_", "", elasticity)
+    gdppc <- gsub("gdppc_", "", gdppc)
+    laborsupply <- gsub("labor_", "", laborsupply)
+    cfr <- gsub("cfr_", "", cfr)
+    R0 <- gsub("R0_", "", R0)
+
+    value_policy_function_list[[name]] = cbind(read_csv(paste0(vpf_filenames[name])),
+                                               run=paste0(label), elasticity=elasticity, gdppc=gdppc, laborsupply=laborsupply, cfr=cfr, R0=R0, eqm=eqm, planner=planner)
+  }
+
+  #Stacks all policy functions together into one large list
+  # stacked_solved_values <- rbindlist(value_policy_function_list)
+
+  # return(list(stacked_solved_values,label))
+  return(value_policy_function_list)
 }
